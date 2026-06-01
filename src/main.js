@@ -165,6 +165,9 @@ async function startApp() {
 }
 
 // ─── Boot ────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+// Natively bypasses DOMContentLoaded racing conditions to guarantee instant execution
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => setupJoinScreen());
+} else {
   setupJoinScreen();
-});
+}
