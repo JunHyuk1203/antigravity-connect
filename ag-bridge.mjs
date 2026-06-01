@@ -27,7 +27,7 @@ function parseArgs() {
 
 const args = parseArgs();
 const ROOM     = args.room     || 'default';
-const PORT     = parseInt(args.port     || '5821');
+const PORT     = parseInt(args.port     || '5822'); // Default to 5822 to avoid conflict with IDE on 5821
 const IDE_PORT = parseInt(args['ide-port'] || '5821');
 const IDE_HOST = args['ide-host'] || '127.0.0.1';
 
