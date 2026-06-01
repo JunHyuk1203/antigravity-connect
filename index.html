@@ -153,6 +153,10 @@
       </div>
 
       <div class="tb-right">
+        <div class="bridge-status" id="bridge-status" title="로컬 Antigravity IDE 연결 상태">
+          <div class="bridge-dot disconnected" id="bridge-dot"></div>
+          <span id="bridge-label">IDE 연결 안됨</span>
+        </div>
         <button class="tb-btn" id="btn-share" title="링크 복사">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
           링크 복사
@@ -231,17 +235,69 @@
             <div class="ai-status-dot" id="ai-status-dot"></div>
             <span class="chat-title">AI 채팅</span>
             <span class="chat-shared-badge">공유됨</span>
+            <span class="host-ide-badge offline" id="host-ide-badge">
+              <span class="badge-icon">🔴</span>
+              <span class="badge-text">Host IDE 연결 안됨</span>
+            </span>
           </div>
           <div class="chat-header-right">
+            <!-- Bridge Connect Button -->
+            <button class="bridge-connect-btn" id="btn-bridge-connect" title="로컬 IDE 연결">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              <span>IDE 연결</span>
+            </button>
             <!-- Model Selector -->
             <div class="model-selector" id="model-selector">
               <button class="model-btn" id="model-btn">
                 <div class="model-indicator"></div>
-                <span id="model-name-display">Gemini 3.5 Flash <small>(내 키)</small></span>
+                <span id="model-name-display">GPT-OSS 120B</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
               <div class="model-dropdown" id="model-dropdown" style="display:none">
-                <div class="model-option active" data-model="gemini-3.5-flash" data-ide-model="">
+                <div class="model-dropdown-section-label">Antigravity IDE 모델</div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="342" id="mopt-342">
+                  <span class="model-opt-icon">⚡</span>
+                  <span class="model-opt-name">GPT-OSS 120B <small>(Medium)</small></span>
+                  <span class="model-quota-badge" id="quota-342"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1018" id="mopt-1018">
+                  <span class="model-opt-icon">✦</span>
+                  <span class="model-opt-name">Gemini 3.5 Flash <small>(Medium)</small></span>
+                  <span class="model-quota-badge" id="quota-1018"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1019" id="mopt-1019">
+                  <span class="model-opt-icon">✦</span>
+                  <span class="model-opt-name">Gemini 3.5 Flash <small>(High)</small></span>
+                  <span class="model-quota-badge" id="quota-1019"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1017" id="mopt-1017">
+                  <span class="model-opt-icon">✦</span>
+                  <span class="model-opt-name">Gemini 3.5 Flash <small>(Low)</small></span>
+                  <span class="model-quota-badge" id="quota-1017"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1164" id="mopt-1164">
+                  <span class="model-opt-icon">◆</span>
+                  <span class="model-opt-name">Gemini 3.1 Pro <small>(Low)</small></span>
+                  <span class="model-quota-badge" id="quota-1164"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1165" id="mopt-1165">
+                  <span class="model-opt-icon">◆</span>
+                  <span class="model-opt-name">Gemini 3.1 Pro <small>(High)</small></span>
+                  <span class="model-quota-badge" id="quota-1165"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1163" id="mopt-1163">
+                  <span class="model-opt-icon">🔮</span>
+                  <span class="model-opt-name">Claude Sonnet 4.6 <small>(Thinking)</small></span>
+                  <span class="model-quota-badge" id="quota-1163"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1154" id="mopt-1154">
+                  <span class="model-opt-icon">🔮</span>
+                  <span class="model-opt-name">Claude Opus 4.6 <small>(Thinking)</small></span>
+                  <span class="model-quota-badge" id="quota-1154"></span>
+                </div>
+                <div class="model-separator"></div>
+                <div class="model-dropdown-section-label">개인 Gemini API 키</div>
+                <div class="model-option" data-model="gemini-3.5-flash" data-ide-model="">
                   <span class="model-opt-icon">🔑</span>
                   <span class="model-opt-name">Gemini 3.5 Flash <small>(내 키)</small></span>
                 </div>
@@ -299,7 +355,54 @@
   <!-- Toast Container -->
   <div id="toast-container"></div>
 
+  <!-- Bridge Setup Modal -->
+  <div id="bridge-modal" style="display:none">
+    <div class="modal-overlay" onclick="closeBridgeModal()"></div>
+    <div class="modal-card">
+      <button class="modal-close" onclick="closeBridgeModal()">✕</button>
+      <h2>🔌 로컬 IDE 연결</h2>
+      <p>Antigravity IDE를 웹앱과 연결하면 IDE의 AI가 채팅에 직접 응답합니다.</p>
 
+      <div class="bridge-steps">
+        <div class="bridge-step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <strong>Antigravity Ask Bridge 확장 설치</strong>
+            <p>Antigravity IDE에서 확장 마켓플레이스를 열고 <code>Antigravity Ask Bridge</code>를 검색해 설치하세요.</p>
+            <a href="https://open-vsx.org/extension/antigravityautomation/antigravity-ask-bridge" target="_blank" class="step-link">확장 페이지 열기 →</a>
+          </div>
+        </div>
+        <div class="bridge-step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <strong>브릿지 스크립트 실행</strong>
+            <p>아래 명령어를 터미널에서 실행하세요 (Node.js 18+ 필요):</p>
+            <div class="code-block" id="bridge-cmd-display">
+              <code>node ag-bridge.mjs --room <span id="bridge-room-display">your-room</span></code>
+              <button class="copy-btn" onclick="copyBridgeCmd()">복사</button>
+            </div>
+            <p class="step-note">ag-bridge.mjs 파일을 먼저 다운로드하세요:</p>
+            <a href="ag-bridge.mjs" download class="step-link">ag-bridge.mjs 다운로드 →</a>
+          </div>
+        </div>
+        <div class="bridge-step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <strong>연결 확인</strong>
+            <p>브릿지가 실행되면 위 상태 표시가 <span style="color:#3FB950">● 연결됨</span>으로 바뀝니다.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="bridge-manual">
+        <p>또는 직접 포트를 지정하세요:</p>
+        <div class="bridge-port-row">
+          <input type="number" id="bridge-port-input" value="5822" min="1000" max="65535" />
+          <button id="btn-connect-bridge">연결 시도</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Floating Live Debug Terminal -->
   <div id="debug-log" style="position:fixed; bottom:12px; left:12px; background:rgba(10,14,20,0.92); color:#4AF626; font-family:'Consolas','Courier New',monospace; font-size:10.5px; padding:10px 14px; border-radius:8px; max-height:120px; width:340px; overflow-y:auto; z-index:10000; pointer-events:none; border:1px solid rgba(74,246,38,0.25); box-shadow:0 8px 32px rgba(0,0,0,0.5); backdrop-filter:blur(8px);">
