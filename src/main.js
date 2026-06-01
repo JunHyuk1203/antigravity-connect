@@ -29,9 +29,16 @@ function setupJoinScreen() {
   const btnRandom  = document.getElementById('btn-random-room');
   const swatches   = document.querySelectorAll('.swatch');
 
-  // Restore from localStorage
-  nameInput.value = localStorage.getItem('ag-name') || '';
-  let selectedColor = localStorage.getItem('ag-color') || '#3B82F6';
+  // Restore from localStorage (safely wrapped to avoid SecurityError)
+  let savedName = '';
+  let selectedColor = '#3B82F6';
+  try {
+    savedName = localStorage.getItem('ag-name') || '';
+    selectedColor = localStorage.getItem('ag-color') || '#3B82F6';
+  } catch (e) {
+    console.warn('[Storage] localStorage restore failed:', e);
+  }
+  nameInput.value = savedName;
 
   // Highlight stored color
   swatches.forEach(s => {
@@ -66,9 +73,13 @@ function setupJoinScreen() {
     if (!name) { nameInput.focus(); nameInput.style.borderColor = '#F85149'; return; }
     if (!room)  { roomInput.focus(); roomInput.style.borderColor = '#F85149'; return; }
 
-    // Save prefs
-    localStorage.setItem('ag-name', name);
-    localStorage.setItem('ag-color', selectedColor);
+    // Save prefs (safely wrapped to avoid SecurityError)
+    try {
+      localStorage.setItem('ag-name', name);
+      localStorage.setItem('ag-color', selectedColor);
+    } catch (e) {
+      console.warn('[Storage] localStorage save failed:', e);
+    }
 
     APP.myName  = name;
     APP.myColor = selectedColor;

@@ -3,6 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script>
+    window.addEventListener('error', function(e) {
+      alert('⚠️ 브라우저 JS 에러 발생:\n\n' + e.message + '\n\n파일: ' + e.filename + '\n줄번호: ' + e.lineno);
+    });
+    window.addEventListener('unhandledrejection', function(e) {
+      alert('⚠️ 비동기 프로미스 예외 발생:\n\n' + e.reason);
+    });
+  </script>
   <title>Antigravity Connect — 실시간 협업 코딩</title>
   <meta name="description" content="Antigravity IDE와 연동된 실시간 협업 코딩 환경. 팀과 함께 코드를 편집하고 AI에게 질문하세요." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><polygon points='16,2 30,28 2,28' fill='%233B82F6'/></svg>" />

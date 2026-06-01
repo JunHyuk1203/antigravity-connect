@@ -23,8 +23,12 @@ export function initChat(ydoc, APP) {
   _APP   = APP;
   _ymsg  = ydoc.getArray('chat:messages');
 
-  // Restore API key
-  _apiKey = localStorage.getItem('ag-gemini-key') || null;
+  // Restore API key (safely wrapped to avoid SecurityError)
+  try {
+    _apiKey = localStorage.getItem('ag-gemini-key') || null;
+  } catch (e) {
+    console.warn('[Storage] ag-gemini-key restore failed:', e);
+  }
   updateAPIKeyUI();
 
   // Observe shared messages and render
@@ -387,7 +391,11 @@ function saveAPIKey() {
     return;
   }
   _apiKey = key;
-  localStorage.setItem('ag-gemini-key', key);
+  try {
+    localStorage.setItem('ag-gemini-key', key);
+  } catch (e) {
+    console.warn('[Storage] ag-gemini-key save failed:', e);
+  }
   updateAPIKeyUI();
   showToast('✅ API 키가 저장됐습니다', 'success');
 }
