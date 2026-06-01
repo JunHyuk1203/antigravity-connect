@@ -13,21 +13,7 @@ let _ymsg    = null; // Y.Array of message objects
 let _APP     = null;
 let _apiKey  = null;
 let _model   = 'gemini-3.5-flash'; // Default to Gemini API
-let _useLocalBridge = false;
-let _useSharedBridge = false;
-let _processingRequests = new Set();
-let _selectedIdeModelId = 342; // GPT_OSS - default IDE model
 let _localProcessing = false; // Track local query processing
-const IDE_MODEL_NAMES = {
-  342:  'GPT-OSS 120B',
-  1018: 'Gemini 3.5 Flash (M)',
-  1019: 'Gemini 3.5 Flash (H)',
-  1017: 'Gemini 3.5 Flash (L)',
-  1164: 'Gemini 3.1 Pro (L)',
-  1165: 'Gemini 3.1 Pro (H)',
-  1163: 'Claude Sonnet 4.6',
-  1154: 'Claude Opus 4.6',
-};
 
 // ─── Init ────────────────────────────────────────
 export function initChat(ydoc, APP) {
@@ -47,15 +33,9 @@ export function initChat(ydoc, APP) {
   _ymsg.observe(() => {
     renderMessages();
     updateInputDisabledState();
-    if (window.__bridge?.connected) {
-      checkForPendingRequests();
-    }
   });
   renderMessages(); // initial
   updateInputDisabledState();
-
-  // Expose check function so bridge.js can trigger it when a local connection succeeds
-  window.__checkForPendingRequests = checkForPendingRequests;
 
   // Input handling
   const chatInput  = document.getElementById('chat-input');
@@ -101,22 +81,7 @@ export function initChat(ydoc, APP) {
     chip.addEventListener('click', () => chip.classList.toggle('active'));
   });
 
-  // Bridge connect button
-  document.getElementById('btn-bridge-connect')?.addEventListener('click', openBridgeModal);
-  document.getElementById('btn-connect-bridge')?.addEventListener('click', tryConnectBridge);
 
-  // Bridge room display
-  const roomDisplay = document.getElementById('bridge-room-display');
-  if (roomDisplay) roomDisplay.textContent = APP.roomId;
-
-  // Model status update from bridge
-  window.addEventListener('modelStatusUpdate', (e) => {
-    const { modelId, status } = e.detail;
-    updateModelQuotaBadge(modelId, status);
-  });
-
-  // Auto-select first IDE model if bridge is connected
-  selectIdeModelById(342);
 }
 
 // ─── Message Rendering ────────────────────────────
@@ -194,45 +159,7 @@ async function sendMessage() {
   input.style.height = 'auto';
   document.getElementById('chat-send-btn').disabled = true;
 
-  if (_model === 'shared-ide') {
-    if (!window.__bridge?.connected) {
-      showToast('⚠️ 브릿지에 연결된 IDE가 없습니다. 런청에서 브릿지를 실행하세요.', 'error');
-      input.value = text;
-      input.style.height = Math.min(input.scrollHeight, 130) + 'px';
-      document.getElementById('chat-send-btn').disabled = false;
-      return;
-    }
 
-    // Build user message
-    const userMsg = {
-      role:     'user',
-      type:     'message',
-      name:     _APP.myName,
-      color:    _APP.myColor,
-      initials: _APP.myName.slice(0,2).toUpperCase(),
-      text,
-      ts:       Date.now(),
-    };
-    _ymsg.push([userMsg]);
-
-    const ctx = buildContext(text);
-
-    // Push pending message to the shared array so the host processes it
-    const pendingId = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
-    const pendingMsg = {
-      id:           pendingId,
-      role:         'ai',
-      type:         'message',
-      name:         'Antigravity AI (연결된 IDE)',
-      text:         '⏳ IDE 응답을 대기 중...',
-      status:       'pending',
-      prompt:       ctx,
-      ideModelId:   _selectedIdeModelId,
-      ts:           Date.now(),
-    };
-    _ymsg.push([pendingMsg]);
-    return;
-  }
 
   // Build user message
   const userMsg = {
@@ -257,9 +184,7 @@ async function sendMessage() {
   updateInputDisabledState();
   try {
     let response;
-    if (_useLocalBridge && window.__bridge?.connected) {
-      response = await sendViaBridge(ctx);
-    } else if (_apiKey) {
+    if (_apiKey) {
       response = await sendViaGemini(ctx);
     } else {
       response = generateMockResponse(text);
@@ -453,180 +378,11 @@ function selectModel(opt) {
   opt.classList.add('active');
   _model = opt.dataset.model;
 
-  // Check if this is an IDE model
-  const ideModelIdStr = opt.dataset.ideModel;
-  if (ideModelIdStr && ideModelIdStr !== '') {
-    const ideModelId = parseInt(ideModelIdStr, 10);
-    selectIdeModelById(ideModelId);
-  } else {
-    // Gemini API model
-    _useLocalBridge = false;
-    _useSharedBridge = false;
-    _model = opt.dataset.model;
-    const nameEl = opt.querySelector('.model-opt-name');
-    document.getElementById('model-name-display').textContent = nameEl ? nameEl.textContent : opt.textContent.trim();
-  }
+  const nameEl = opt.querySelector('.model-opt-name');
+  document.getElementById('model-name-display').textContent = nameEl ? nameEl.textContent : opt.textContent.trim();
 
   document.getElementById('model-dropdown').style.display = 'none';
   updateAPIKeyUI();
-}
-
-function selectIdeModelById(ideModelId) {
-  _selectedIdeModelId = ideModelId;
-  _model = 'shared-ide';
-  _useLocalBridge = false;
-  _useSharedBridge = true;
-
-  // Update bridge state
-  if (window.__bridge) window.__bridge.selectedIdeModel = ideModelId;
-
-  // Update display name
-  const name = IDE_MODEL_NAMES[ideModelId] || `Model ${ideModelId}`;
-  document.getElementById('model-name-display').textContent = name;
-
-  // Check quota status
-  const status = window.__bridge?.modelQuotaStatus?.[ideModelId];
-  if (status === 'quota_exceeded') {
-    showToast(`⚠️ ${name}: 한도 초과 상태입니다. 다른 모델을 선택하세요.`, 'error');
-  } else if (status === 'unavailable') {
-    showToast(`⚠️ ${name}: 현재 계정에서 사용 불가능한 모델입니다.`, 'error');
-  }
-
-  updateAPIKeyUI();
-}
-
-function updateModelQuotaBadge(modelId, status) {
-  const badge = document.getElementById(`quota-${modelId}`);
-  if (!badge) return;
-  if (status === 'quota_exceeded') {
-    badge.textContent = '한도 초과';
-    badge.className = 'model-quota-badge quota-exceeded';
-  } else if (status === 'unavailable') {
-    badge.textContent = '미지원';
-    badge.className = 'model-quota-badge quota-unavailable';
-  } else if (status === 'ok') {
-    badge.textContent = '';
-    badge.className = 'model-quota-badge';
-  }
-
-  // Also mark the option row visually
-  const optEl = document.getElementById(`mopt-${modelId}`);
-  if (optEl) {
-    optEl.classList.toggle('model-quota-exceeded', status === 'quota_exceeded');
-    optEl.classList.toggle('model-unavailable', status === 'unavailable');
-  }
-}
-
-// ─── Bridge Modal ─────────────────────────────────
-function openBridgeModal() {
-  document.getElementById('bridge-modal').style.display = 'flex';
-  const roomDisplay = document.getElementById('bridge-room-display');
-  if (roomDisplay && _APP) roomDisplay.textContent = _APP.roomId;
-}
-
-window.closeBridgeModal = function () {
-  document.getElementById('bridge-modal').style.display = 'none';
-};
-
-window.copyBridgeCmd = function () {
-  const room = _APP?.roomId || 'your-room';
-  navigator.clipboard.writeText(`node ag-bridge.mjs --room ${room}`)
-    .then(() => showToast('명령어 복사됨', 'success'));
-};
-
-function tryConnectBridge() {
-  const port = document.getElementById('bridge-port-input').value || '5822';
-  if (window.__bridge) {
-    window.__bridge.connect(`ws://127.0.0.1:${port}`, _APP.roomId);
-  }
-}
-
-async function checkForPendingRequests() {
-  if (!window.__bridge?.connected) return;
-
-  const msgs = _ymsg.toArray();
-  const pendingIndex = msgs.findIndex(m => m.status === 'pending');
-  if (pendingIndex === -1) return;
-
-  const msg = msgs[pendingIndex];
-  
-  if (_processingRequests.has(msg.id)) return;
-  _processingRequests.add(msg.id);
-
-  console.log(`[Host] Processing pending request: ${msg.id}`);
-
-  const ideModelId = msg.ideModelId || _selectedIdeModelId;
-
-  // Claim the task
-  const claimedMsg = {
-    ...msg,
-    status: 'processing',
-    hostClientId: _ydoc.clientID.toString(),
-    hostName: _APP.myName,
-    text: `⏳ Antigravity IDE에서 답변을 생성하는 중... (호스트: ${escHtml(_APP.myName)}, 모델: ${IDE_MODEL_NAMES[ideModelId] || ideModelId})`,
-  };
-
-  try {
-    _ydoc.transact(() => {
-      const currentMsgs = _ymsg.toArray();
-      const idx = currentMsgs.findIndex(m => m.id === msg.id);
-      if (idx !== -1) {
-        _ymsg.delete(idx, 1);
-        _ymsg.insert(idx, [claimedMsg]);
-      }
-    });
-
-    const response = await sendViaBridge(msg.prompt, ideModelId);
-
-    const finalMsg = {
-      id:   msg.id,
-      role: 'ai',
-      type: 'message',
-      name: `Antigravity AI (via ${claimedMsg.hostName})`,
-      text: response,
-      ts:   Date.now(),
-    };
-
-    _ydoc.transact(() => {
-      const latestMsgs = _ymsg.toArray();
-      const latestIndex = latestMsgs.findIndex(m => m.id === msg.id);
-      if (latestIndex !== -1) {
-        _ymsg.delete(latestIndex, 1);
-        _ymsg.insert(latestIndex, [finalMsg]);
-      }
-    });
-  } catch (err) {
-    console.error('[Host] Error processing pending request:', err);
-    _ydoc.transact(() => {
-      const latestMsgs = _ymsg.toArray();
-      const latestIndex = latestMsgs.findIndex(m => m.id === msg.id);
-      if (latestIndex !== -1) {
-        _ymsg.delete(latestIndex, 1);
-        _ymsg.insert(latestIndex, [{
-          id:   msg.id,
-          role: 'ai',
-          type: 'message',
-          name: 'Antigravity AI',
-          text: `⚠️ 호스트 IDE 처리 중 에러 발생: ${err.message}`,
-          ts:   Date.now(),
-        }]);
-      }
-    });
-  } finally {
-    _processingRequests.delete(msg.id);
-  }
-}
-
-// Export for bridge.js to call
-export function onBridgeMessage(text) {
-  const aiMsg = {
-    role: 'ai',
-    type: 'message',
-    name: 'Antigravity AI (로컬)',
-    text,
-    ts:   Date.now(),
-  };
-  _ymsg?.push([aiMsg]);
 }
 
 function updateInputDisabledState() {
@@ -634,8 +390,7 @@ function updateInputDisabledState() {
   const sendBtn = document.getElementById('chat-send-btn');
   if (!input) return;
 
-  const msgs = _ymsg ? _ymsg.toArray() : [];
-  const isBusy = _localProcessing || msgs.some(m => m.status === 'pending' || m.status === 'processing');
+  const isBusy = _localProcessing;
 
   if (isBusy) {
     input.disabled = true;
