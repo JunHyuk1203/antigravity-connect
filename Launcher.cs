@@ -142,12 +142,9 @@ namespace AntigravityConnect
 
         private void GenerateRandomRoom()
         {
-            string[] words = { "team", "project", "code", "dev", "room", "collab", "antigravity", "space" };
             Random rand = new Random();
-            string word1 = words[rand.Next(words.Length)];
-            string word2 = words[rand.Next(words.Length)];
-            int num = rand.Next(100, 999);
-            txtRoomId.Text = string.Format("{0}-{1}-{2}", word1, word2, num);
+            int num = rand.Next(100, 1000); // 100 to 999
+            txtRoomId.Text = num.ToString();
         }
 
         private void Log(string message)

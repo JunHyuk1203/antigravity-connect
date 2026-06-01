@@ -49,11 +49,9 @@ function setupJoinScreen() {
   const hashRoom = new URLSearchParams(window.location.hash.replace('#', '')).get('room');
   if (hashRoom) roomInput.value = hashRoom;
 
-  // Random room ID
+  // Random room ID (3 digits)
   btnRandom.addEventListener('click', () => {
-    const words = ['alpha','bravo','charlie','delta','echo','foxtrot','galaxy','nova','orbit','pulse','quantum','relay','sigma','terra','vega','zeta'];
-    const pick = () => words[Math.floor(Math.random() * words.length)];
-    roomInput.value = `${pick()}-${pick()}-${Math.floor(Math.random()*900+100)}`;
+    roomInput.value = Math.floor(Math.random() * 900 + 100).toString();
   });
 
   // Join
