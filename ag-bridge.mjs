@@ -27,9 +27,24 @@ function parseArgs() {
 
 const args = parseArgs();
 const ROOM     = args.room     || 'default';
-const PORT     = parseInt(args.port     || '5822'); // Default to 5822 to avoid conflict with IDE on 5821
+const PORT     = parseInt(args.port     || '5822');
 const IDE_PORT = parseInt(args['ide-port'] || '5821');
 const IDE_HOST = args['ide-host'] || '127.0.0.1';
+
+// ─── Model Constants ──────────────────────────────
+// These numeric IDs match the IDE extension's internal enum.
+const IDE_MODELS = {
+  GEMINI_FLASH:    1018,
+  GEMINI_PRO_LOW:  1164,
+  GEMINI_PRO_HIGH: 1165,
+  CLAUDE_SONNET:   1163,
+  CLAUDE_OPUS:     1154,
+  GPT_OSS:         342,
+};
+// GPT_OSS (342) is the only model working on this account tier.
+// GEMINI_FLASH (1018) quota resets at ~21:34 KST.
+// CLAUDE_SONNET (1163) / CLAUDE_OPUS (1154) not available on this tier.
+const DEFAULT_MODEL = IDE_MODELS.GPT_OSS;
 
 console.log(`
 ╔═══════════════════════════════════════╗
@@ -374,7 +389,7 @@ function postJSON(path, obj) {
       res.on('data', (chunk) => body += chunk);
       res.on('end', () => {
         try {
-          resolve(JSON.parse(body));
+          resolve({ statusCode: res.statusCode, data: JSON.parse(body) });
         } catch (e) {
           reject(new Error('Invalid JSON response'));
         }
@@ -439,16 +454,17 @@ async function forwardToIDE(id, prompt, requesterWs) {
     return;
   }
 
-  console.log(`[Bridge] Queueing job in IDE...`);
+  console.log(`[Bridge] Queueing job in IDE with model=${DEFAULT_MODEL} (Claude Sonnet)...`);
   
   let jobId = null;
   try {
-    const res = await postJSON('/conversations', { text: prompt });
+    const result = await postJSON('/conversations', { text: prompt, model: DEFAULT_MODEL });
+    const res = result.data;
     if (res && res.success && res.job_id) {
       jobId = res.job_id;
       console.log(`[Bridge] Job queued successfully, Job ID: ${jobId}`);
     } else {
-      throw new Error(res?.error || 'Queue failed');
+      throw new Error(res?.error || `HTTP ${result.statusCode}`);
     }
   } catch (err) {
     console.error(`[Bridge] Queue failed:`, err.message);
