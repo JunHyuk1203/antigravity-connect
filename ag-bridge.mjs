@@ -463,11 +463,18 @@ async function forwardToIDE(id, prompt, modelId, requesterWs) {
     const activeRes = await getJSON('/conversations/active');
     const candidate = activeRes?.conversation_id;
     if (candidate && activeRes?.error === undefined) {
-      activeConvoId = candidate;
-      console.log(`[Bridge] Active conversation via /active: ${activeConvoId}`);
+      // 대화 상태 목록을 조회하여 candidate가 RUNNING 인지 확인 (현재 이 AI 대화 세션 등과의 충돌 방지)
+      const list = await getJSON('/conversations');
+      const status = list?.[candidate]?.status;
+      if (status === 'CASCADE_RUN_STATUS_RUNNING') {
+        console.log(`[Bridge] Active conversation ${candidate} is currently RUNNING. Ignoring to prevent conflicts.`);
+      } else {
+        activeConvoId = candidate;
+        console.log(`[Bridge] Active conversation via /active: ${activeConvoId}`);
+      }
     }
   } catch (e) {
-    console.log('[Bridge] /conversations/active not available, using list fallback...');
+    console.log('[Bridge] /conversations/active not available or error checking status, using list fallback...');
   }
 
   // 방법 B: GET /conversations 리스트에서 찾기 (IDE 재시작 전 폴백)
@@ -676,8 +683,20 @@ async function pollJobToCompletion(id, jobId, resolvedModel, requesterWs) {
                 requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: 'ok' }));
               } else {
                 const errStep = (convo?.trajectory?.steps ?? []).findLast(s => s.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE');
-                const msg = errStep?.errorMessage?.error?.userErrorMessage;
-                requesterWs.send(JSON.stringify({ type: 'response', id, text: msg ? `⚠️ ${msg}` : 'IDE 응답 없음' }));
+                const userErrMsg = errStep?.errorMessage?.error?.userErrorMessage;
+                const errorCode = errStep?.errorMessage?.error?.errorCode;
+                let modelStatus = 'unavailable';
+                let fallbackText = 'IDE에서 응답을 받지 못했습니다.';
+                if (userErrMsg) {
+                  if (errorCode === 429 || userErrMsg.includes('quota') || userErrMsg.includes('Quota')) {
+                    modelStatus = 'quota_exceeded';
+                    fallbackText = `⚠️ 한도 초과: ${userErrMsg}`;
+                  } else {
+                    fallbackText = `⚠️ IDE 오류: ${userErrMsg}`;
+                  }
+                }
+                requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: modelStatus }));
+                requesterWs.send(JSON.stringify({ type: 'response', id, text: fallbackText }));
               }
             } else if (attempts >= 50) {
               clean();
@@ -687,7 +706,13 @@ async function pollJobToCompletion(id, jobId, resolvedModel, requesterWs) {
         }, 1000);
       } else if (job.status === 'failed') {
         clean();
-        requesterWs.send(JSON.stringify({ type: 'response', id, text: `IDE 처리 오류: ${job.error || '알 수 없음'}` }));
+        const errText = job.error || '알 수 없음';
+        let modelStatus = 'unavailable';
+        if (errText.includes('quota') || errText.includes('Quota') || errText.includes('429')) {
+          modelStatus = 'quota_exceeded';
+        }
+        requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: modelStatus }));
+        requesterWs.send(JSON.stringify({ type: 'response', id, text: `⚠️ IDE 오류: ${errText}` }));
       }
     } catch (err) { console.error('[Bridge] job poll error:', err.message); }
   }, 1000);
