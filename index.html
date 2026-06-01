@@ -235,13 +235,16 @@
             <div class="ai-status-dot" id="ai-status-dot"></div>
             <span class="chat-title">AI 채팅</span>
             <span class="chat-shared-badge">공유됨</span>
-            <span class="host-ide-badge offline" id="host-ide-badge">🔴 Host IDE 연결 안됨</span>
+            <span class="host-ide-badge offline" id="host-ide-badge">
+              <span class="badge-icon">🔴</span>
+              <span class="badge-text">Host IDE 연결 안됨</span>
+            </span>
           </div>
           <div class="chat-header-right">
             <!-- Bridge Connect Button -->
             <button class="bridge-connect-btn" id="btn-bridge-connect" title="로컬 IDE 연결">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-              IDE 연결
+              <span>IDE 연결</span>
             </button>
             <!-- Model Selector -->
             <div class="model-selector" id="model-selector">

@@ -63,11 +63,15 @@ function updateHostIdeStatus(states) {
 
   const badge = document.getElementById('host-ide-badge');
   if (badge) {
+    const iconEl = badge.querySelector('.badge-icon');
+    const textEl = badge.querySelector('.badge-text');
     if (hostConnected) {
-      badge.textContent = `🟢 Host IDE (${hostName})`;
+      if (iconEl) iconEl.textContent = '🟢';
+      if (textEl) textEl.textContent = `Host IDE (${hostName})`;
       badge.className = 'host-ide-badge online';
     } else {
-      badge.textContent = '🔴 Host IDE 연결 안됨';
+      if (iconEl) iconEl.textContent = '🔴';
+      if (textEl) textEl.textContent = 'Host IDE 연결 안됨';
       badge.className = 'host-ide-badge offline';
     }
   }

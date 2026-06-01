@@ -145,6 +145,9 @@ async function startApp() {
   initBridge(APP);
   if (window.debugLog) window.debugLog("🎉 [성공] 룸 접속 및 전 시스템 연동이 성공적으로 완료되었습니다!");
 
+  // Initialize Resize Handle for Chat Pane
+  setupResizeHandle();
+
   // ─── Share button ───
   document.getElementById('btn-share').addEventListener('click', () => {
     const url = window.location.href;
@@ -160,6 +163,40 @@ async function startApp() {
       ydoc.destroy();
       window.location.hash = '';
       window.location.reload();
+    }
+  });
+}
+
+function setupResizeHandle() {
+  const handle = document.getElementById('resize-handle');
+  const chatPane = document.getElementById('chat-pane');
+  if (!handle || !chatPane) return;
+
+  let isDragging = false;
+
+  handle.addEventListener('mousedown', (e) => {
+    isDragging = true;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return;
+    const containerWidth = window.innerWidth;
+    const newWidth = containerWidth - e.clientX;
+    // Constrain width between 280px and 700px
+    const constrainedWidth = Math.max(280, Math.min(newWidth, 700));
+    chatPane.style.width = `${constrainedWidth}px`;
+    document.documentElement.style.setProperty('--chat-w', `${constrainedWidth}px`);
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (isDragging) {
+      isDragging = false;
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
     }
   });
 }

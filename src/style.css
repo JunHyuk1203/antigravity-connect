@@ -664,15 +664,7 @@ a:hover { text-decoration: underline; }
 /* ═══════════════════════════════════════════════════
    AI CHAT PANEL
    ═══════════════════════════════════════════════════ */
-#chat-pane {
-  width: var(--chat-w);
-  background: var(--bg-surface);
-  border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  overflow: hidden;
-}
+
 
 #chat-header {
   height: var(--tab-h);
@@ -712,6 +704,47 @@ a:hover { text-decoration: underline; }
   font-weight: 500;
 }
 
+#chat-pane {
+  width: var(--chat-w);
+  background: var(--bg-surface);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  container-type: inline-size;
+  container-name: chat;
+}
+
+@container chat (max-width: 480px) {
+  .host-ide-badge .badge-text {
+    display: none;
+  }
+  .host-ide-badge {
+    padding: 2px;
+    width: 22px;
+    height: 22px;
+    justify-content: center;
+    border-radius: 50%;
+  }
+}
+@container chat (max-width: 400px) {
+  .chat-shared-badge {
+    display: none;
+  }
+  .bridge-connect-btn span {
+    display: none;
+  }
+  .bridge-connect-btn {
+    padding: 6px;
+  }
+}
+@container chat (max-width: 320px) {
+  .chat-title {
+    display: none;
+  }
+}
+
 .host-ide-badge {
   font-size: 10.5px;
   padding: 2px 7px;
@@ -733,6 +766,12 @@ a:hover { text-decoration: underline; }
 }
 
 .chat-header-right { display: flex; align-items: center; gap: 6px; }
+
+/* Busy text area */
+#chat-input.busy {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 
 /* Bridge Connect Button */
 .bridge-connect-btn {
@@ -973,6 +1012,8 @@ a:hover { text-decoration: underline; }
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   margin-left: 32px;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .msg-body.ai-body {

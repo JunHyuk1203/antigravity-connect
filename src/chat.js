@@ -17,6 +17,7 @@ let _useLocalBridge = false;
 let _useSharedBridge = false;
 let _processingRequests = new Set();
 let _selectedIdeModelId = 342; // GPT_OSS - default IDE model
+let _localProcessing = false; // Track local query processing
 const IDE_MODEL_NAMES = {
   342:  'GPT-OSS 120B',
   1018: 'Gemini 3.5 Flash (M)',
@@ -45,11 +46,13 @@ export function initChat(ydoc, APP) {
   // Observe shared messages and render
   _ymsg.observe(() => {
     renderMessages();
+    updateInputDisabledState();
     if (window.__bridge?.connected) {
       checkForPendingRequests();
     }
   });
   renderMessages(); // initial
+  updateInputDisabledState();
 
   // Expose check function so bridge.js can trigger it when a local connection succeeds
   window.__checkForPendingRequests = checkForPendingRequests;
@@ -61,7 +64,9 @@ export function initChat(ydoc, APP) {
   chatInput.addEventListener('input', function () {
     this.style.height = 'auto';
     this.style.height = Math.min(this.scrollHeight, 130) + 'px';
-    sendBtn.disabled = !this.value.trim();
+    const msgs = _ymsg ? _ymsg.toArray() : [];
+    const isBusy = _localProcessing || msgs.some(m => m.status === 'pending' || m.status === 'processing');
+    sendBtn.disabled = !this.value.trim() || isBusy;
     sendBtn.parentElement.style.display = 'flex';
   });
 
@@ -248,6 +253,8 @@ async function sendMessage() {
   const ctx = buildContext(text);
 
   // Send to AI
+  _localProcessing = true;
+  updateInputDisabledState();
   try {
     let response;
     if (_useLocalBridge && window.__bridge?.connected) {
@@ -279,7 +286,11 @@ async function sendMessage() {
       ts:   Date.now(),
     };
     _ymsg.push([errMsg]);
+  } finally {
+    _localProcessing = false;
+    updateInputDisabledState();
   }
+}
 }
 
 function buildContext(userText) {
@@ -617,4 +628,25 @@ export function onBridgeMessage(text) {
     ts:   Date.now(),
   };
   _ymsg?.push([aiMsg]);
+}
+
+function updateInputDisabledState() {
+  const input = document.getElementById('chat-input');
+  const sendBtn = document.getElementById('chat-send-btn');
+  if (!input) return;
+
+  const msgs = _ymsg ? _ymsg.toArray() : [];
+  const isBusy = _localProcessing || msgs.some(m => m.status === 'pending' || m.status === 'processing');
+
+  if (isBusy) {
+    input.disabled = true;
+    if (sendBtn) sendBtn.disabled = true;
+    input.placeholder = 'AI가 답변을 생성하는 중에는 질문할 수 없습니다...';
+    input.classList.add('busy');
+  } else {
+    input.disabled = false;
+    if (sendBtn) sendBtn.disabled = !input.value.trim();
+    input.placeholder = 'AI에게 코드에 대해 질문하세요... (Shift+Enter 줄바꿈)';
+    input.classList.remove('busy');
+  }
 }
