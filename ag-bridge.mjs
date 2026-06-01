@@ -457,19 +457,52 @@ async function forwardToIDE(id, prompt, modelId, requesterWs) {
 
   // ── Step 1: 현재 IDE에 열린 활성 대화 ID 조회 ──────────────────────────
   let activeConvoId = null;
+
+  // 방법 A: /conversations/active 엔드포인트 (IDE 재시작 후 사용 가능)
   try {
     const activeRes = await getJSON('/conversations/active');
-    activeConvoId = activeRes?.conversation_id ?? null;
-    if (activeConvoId) {
-      console.log(`[Bridge] Active conversation in IDE: ${activeConvoId}`);
+    const candidate = activeRes?.conversation_id;
+    if (candidate && activeRes?.error === undefined) {
+      activeConvoId = candidate;
+      console.log(`[Bridge] Active conversation via /active: ${activeConvoId}`);
     }
   } catch (e) {
-    console.warn('[Bridge] /conversations/active failed:', e.message);
+    console.log('[Bridge] /conversations/active not available, using list fallback...');
+  }
+
+  // 방법 B: GET /conversations 리스트에서 찾기 (IDE 재시작 전 폴백)
+  if (!activeConvoId) {
+    try {
+      const list = await getJSON('/conversations');
+      if (list && typeof list === 'object' && !list.error) {
+        // IDLE 상태이고 summary가 있는 가장 최근 대화 선택
+        // (RUNNING은 현재 AI가 작업 중인 세션 — 건드리면 충돌)
+        const idleWithSummary = Object.entries(list)
+          .filter(([, v]) => v.status === 'CASCADE_RUN_STATUS_IDLE' && v.summary)
+          .map(([k]) => k);
+
+        if (idleWithSummary.length > 0) {
+          activeConvoId = idleWithSummary[0];
+          console.log(`[Bridge] Active conversation via list: ${activeConvoId} (${list[activeConvoId]?.summary})`);
+        } else {
+          // summary 없어도 IDLE인 것 사용
+          const idleAny = Object.entries(list)
+            .filter(([, v]) => v.status === 'CASCADE_RUN_STATUS_IDLE')
+            .map(([k]) => k);
+          if (idleAny.length > 0) {
+            activeConvoId = idleAny[0];
+            console.log(`[Bridge] Active conversation via list (no summary): ${activeConvoId}`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Bridge] listConversations failed:', e.message);
+    }
   }
 
   // ── Step 2: 활성 대화가 없으면 새 대화 생성 (폴백) ───────────────────────
   if (!activeConvoId) {
-    console.log('[Bridge] No active conversation. Creating new one...');
+    console.log('[Bridge] No suitable conversation found. Creating new one...');
     let jobId = null;
     try {
       const result = await postJSON('/conversations', { text: prompt, model: resolvedModel });
@@ -499,6 +532,7 @@ async function forwardToIDE(id, prompt, modelId, requesterWs) {
   }
 
   // ── Step 4: 활성 대화에 메시지 전송 ──────────────────────────────────────
+  let messageSent = false;
   try {
     const result = await postJSON(`/conversations/${activeConvoId}/message`, {
       text: prompt,
@@ -508,9 +542,28 @@ async function forwardToIDE(id, prompt, modelId, requesterWs) {
       throw new Error(result.data?.error || `HTTP ${result.statusCode}`);
     }
     console.log(`[Bridge] ✅ Message sent to active conversation`);
+    messageSent = true;
   } catch (err) {
-    console.error('[Bridge] Send message failed:', err.message);
-    requesterWs.send(JSON.stringify({ type: 'response', id, text: `메시지 전송 실패: ${err.message}` }));
+    console.error('[Bridge] Send message to active conversation failed, falling back to new conversation:', err.message);
+  }
+
+  if (!messageSent) {
+    console.log('[Bridge] Creating new conversation because sending to active failed...');
+    let jobId = null;
+    try {
+      const result = await postJSON('/conversations', { text: prompt, model: resolvedModel });
+      const res = result.data;
+      if (res?.success && res.job_id) {
+        jobId = res.job_id;
+        console.log(`[Bridge] New job: ${jobId}`);
+      } else {
+        throw new Error(res?.error || `HTTP ${result.statusCode}`);
+      }
+    } catch (err) {
+      requesterWs.send(JSON.stringify({ type: 'response', id, text: `IDE 연결 실패: ${err.message}` }));
+      return;
+    }
+    await pollJobToCompletion(id, jobId, resolvedModel, requesterWs);
     return;
   }
 
