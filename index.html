@@ -3,6 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script type="importmap">
+    {
+      "imports": {
+        "yjs": "https://esm.sh/yjs@13.6.23",
+        "y-webrtc": "https://esm.sh/y-webrtc@10.3.0",
+        "y-indexeddb": "https://esm.sh/y-indexeddb@9.0.12"
+      }
+    }
+  </script>
   <script>
     window.addEventListener('error', function(e) {
       alert('⚠️ 브라우저 JS 에러 발생:\n\n' + e.message + '\n\n파일: ' + e.filename + '\n줄번호: ' + e.lineno);
