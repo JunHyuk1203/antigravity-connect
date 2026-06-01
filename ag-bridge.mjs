@@ -412,6 +412,23 @@ function getJSON(path) {
   });
 }
 
+function listConversations() {
+  return getJSON('/conversations');
+}
+
+function isConversationFinished(convo) {
+  const steps = convo?.trajectory?.steps ?? [];
+  const lastStep = steps.at(-1);
+  return Boolean(lastStep && lastStep.type !== 'CORTEX_STEP_TYPE_USER_INPUT');
+}
+
+function isCascadeIdle(listData, conversationId) {
+  if (!listData || typeof listData !== 'object') return false;
+  const entry = listData[conversationId];
+  if (!entry) return false;
+  return entry.status === 'CASCADE_RUN_STATUS_IDLE';
+}
+
 async function forwardToIDE(id, prompt, requesterWs) {
   if (!ideSocket || ideSocket.readyState !== 1) {
     requesterWs.send(JSON.stringify({
@@ -474,30 +491,46 @@ async function forwardToIDE(id, prompt, requesterWs) {
         pollTimer = null;
         
         const convoId = job.conversation_id;
-        console.log(`[Bridge] Job queued successfully in IDE! Conversation ID: ${convoId}. Waiting for AI response generation...`);
+        console.log(`[Bridge] Job completed! Conversation ID: ${convoId}. Waiting for cascade idle + response...`);
         
         let attempts = 0;
-        const maxAttempts = 35; // wait up to 35 seconds for AI to write steps
+        const maxAttempts = 40;
         
         convoPollTimer = setInterval(async () => {
           attempts++;
           try {
-            const convo = await getJSON(`/conversations/${convoId}`);
-            const aiText = extractConversationText(convo);
-            
-            console.log(`[Bridge] Polling AI response (attempt ${attempts}/${maxAttempts})...`);
-            
-            if (aiText) {
+            const [convo, convoList] = await Promise.all([
+              getJSON(`/conversations/${convoId}`),
+              listConversations().catch(() => null),
+            ]);
+
+            const finished = isConversationFinished(convo);
+            const idle = convoList ? isCascadeIdle(convoList, convoId) : true; // if list fails, assume idle
+
+            console.log(`[Bridge] Poll attempt ${attempts}/${maxAttempts}: finished=${finished}, idle=${idle}`);
+
+            if (finished && idle) {
+              const result = extractConversationText(convo);
               cleanTimers();
-              console.log(`[Bridge] AI Response successfully retrieved! Sending to client.`);
-              requesterWs.send(JSON.stringify({ type: 'response', id, text: aiText }));
+              if (result) {
+                console.log(`[Bridge] ✅ AI Response retrieved. Sending to client.`);
+                requesterWs.send(JSON.stringify({ type: 'response', id, text: result }));
+              } else {
+                // finished but no text — report error step if present
+                const errStep = (convo?.trajectory?.steps ?? []).findLast(s => s.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE');
+                const userErrMsg = errStep?.errorMessage?.error?.userErrorMessage;
+                const fallback = userErrMsg
+                  ? `⚠️ IDE AI 오류: ${userErrMsg}`
+                  : 'IDE에서 대화를 열었으나, AI가 답변을 작성하지 못했습니다.';
+                console.warn(`[Bridge] Conversation finished but no text. Error step:`, errStep);
+                requesterWs.send(JSON.stringify({ type: 'response', id, text: fallback }));
+              }
             } else if (attempts >= maxAttempts) {
               cleanTimers();
-              console.warn(`[Bridge] AI Response timeout. Trajectory steps:`, convo?.trajectory?.steps);
               requesterWs.send(JSON.stringify({
                 type: 'response',
                 id,
-                text: 'IDE에서 대화를 열었으나, AI가 답변을 작성하지 못했거나 시간이 초과되었습니다.',
+                text: 'IDE 응답 대기 시간이 초과됐습니다. AI가 여전히 처리 중이거나 오류가 발생했을 수 있습니다.',
               }));
             }
           } catch (convoErr) {
@@ -524,14 +557,21 @@ function extractConversationText(convo) {
   for (let i = steps.length - 1; i >= 0; i--) {
     const step = steps[i];
     if (step.type === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') {
-      return step.plannerResponse?.modifiedResponse ?? step.plannerResponse?.response ?? null;
+      // plannerResponse with no response/modifiedResponse means it errored (STOP_REASON_CLIENT_STREAM_ERROR etc)
+      const text = step.plannerResponse?.modifiedResponse ?? step.plannerResponse?.response ?? null;
+      if (text) return text;
+      continue;
     }
     if (step.type === 'CORTEX_STEP_TYPE_MODEL_RESPONSE') {
-      return step.modelResponse?.text ?? null;
+      const text = step.modelResponse?.text ?? null;
+      if (text) return text;
+      continue;
     }
     if (step.type === 'CORTEX_STEP_TYPE_NOTIFY_USER') {
       return step.notifyUser?.notificationContent ?? null;
     }
+    // NOTE: CORTEX_STEP_TYPE_ERROR_MESSAGE is intentionally NOT handled here.
+    // Error steps are handled in forwardToIDE after isConversationFinished check.
   }
   return null;
 }
