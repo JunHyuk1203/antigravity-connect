@@ -160,6 +160,29 @@ namespace AntigravityConnect
             txtLog.AppendText(string.Format("[{0}] {1}{2}", DateTime.Now.ToString("HH:mm:ss"), message, Environment.NewLine));
         }
 
+        private void OpenUrl(string url)
+        {
+            try
+            {
+                Process.Start(url);
+                Log(string.Format("웹 접속 열기: {0}", url));
+            }
+            catch
+            {
+                try
+                {
+                    // Fallback using explorer.exe to bypass default browser registration issues
+                    Process.Start("explorer.exe", "\"" + url + "\"");
+                    Log(string.Format("웹 접속 열기(explorer fallback): {0}", url));
+                }
+                catch (Exception ex)
+                {
+                    Log(string.Format("❌ 에러: 브라우저 실행 실패 ({0})", ex.Message));
+                    MessageBox.Show(string.Format("브라우저를 자동으로 실행할 수 없습니다.\n아래 주소로 직접 접속해 주세요:\n\n{0}", url), "알림", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+            }
+        }
+
         private void BtnGuest_Click(object sender, EventArgs e)
         {
             string room = txtRoomId.Text.Trim();
@@ -170,15 +193,7 @@ namespace AntigravityConnect
             }
 
             string url = string.Format("https://JunHyuk1203.github.io/antigravity-connect/#room={0}", room);
-            try
-            {
-                Process.Start(url);
-                Log(string.Format("게스트 브라우저 가동: {0}", url));
-            }
-            catch (Exception ex)
-            {
-                Log(string.Format("에러: 브라우저 실행 실패 ({0})", ex.Message));
-            }
+            OpenUrl(url);
         }
 
         private void BtnHost_Click(object sender, EventArgs e)
@@ -256,8 +271,15 @@ namespace AntigravityConnect
             {
                 using (WebClient client = new WebClient())
                 {
-                    // Enable TLS 1.2 for Node.js download mirror
-                    ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+                    try
+                    {
+                        // Enable TLS 1.2 for Node.js download mirror (encased in try-catch to support older JIT)
+                        ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+                    }
+                    catch (Exception ex)
+                    {
+                        Log("⚠️ TLS 1.2 강제 활성화 실패 (시스템 fallback): " + ex.Message);
+                    }
 
                     client.DownloadProgressChanged += (s, e) => {
                         lblStatus.Text = string.Format("포터블 Node.js 다운로드 중... {0}%", e.ProgressPercentage);
@@ -271,7 +293,7 @@ namespace AntigravityConnect
                             btnHost.Enabled = true;
                             UpdateHostButtonState(false);
                             MessageBox.Show("Node.js 다운로드에 실패했습니다. 공식 홈페이지에서 직접 설치해 주세요.", "에러", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                            try { Process.Start("https://nodejs.org/"); } catch {}
+                            OpenUrl("https://nodejs.org/");
                             return;
                         }
 
@@ -334,8 +356,7 @@ namespace AntigravityConnect
 
                 // Open browser
                 string url = string.Format("https://JunHyuk1203.github.io/antigravity-connect/#room={0}", room);
-                Process.Start(url);
-                Log(string.Format("호스트 웹 접속 열기: {0}", url));
+                OpenUrl(url);
             }
             catch (Exception ex)
             {
@@ -396,6 +417,33 @@ namespace AntigravityConnect
 
         [STAThread]
         public static void Main()
+        {
+            // Global Exception Diagnostic Handler to catch and show JIT errors on startup
+            AppDomain.CurrentDomain.UnhandledException += (s, e) => {
+                MessageBox.Show(
+                    "프로그램 시작 중 치명적인 예외가 발생했습니다:\n\n" + e.ExceptionObject.ToString(),
+                    "Antigravity Connect Launcher 오류",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+            };
+
+            try
+            {
+                RunApp();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "프로그램 가동 중 치명적인 에러가 발생했습니다:\n\n" + ex.ToString(),
+                    "Antigravity Connect Launcher 치명적 오류",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+            }
+        }
+
+        private static void RunApp()
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
