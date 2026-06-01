@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Antigravity Connect — 실시간 협업 코딩</title>
+  <meta name="description" content="Antigravity IDE와 연동된 실시간 협업 코딩 환경. 팀과 함께 코드를 편집하고 AI에게 질문하세요." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><polygon points='16,2 30,28 2,28' fill='%233B82F6'/></svg>" />
+  <link rel="stylesheet" href="src/style.css" />
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <!-- Y.js ecosystem via ESM CDN -->
+  <script type="importmap">
+  {
+    "imports": {
+      "yjs": "https://esm.sh/yjs@13.6.23",
+      "y-webrtc": "https://esm.sh/y-webrtc@10.3.0",
+      "y-indexeddb": "https://esm.sh/y-indexeddb@9.0.12",
+      "lib0/": "https://esm.sh/lib0@0.2.97/"
+    }
+  }
+  </script>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════
+       JOIN SCREEN
+  ═══════════════════════════════════ -->
+  <div id="join-screen">
+    <div class="join-bg">
+      <div class="join-orb orb-1"></div>
+      <div class="join-orb orb-2"></div>
+      <div class="join-orb orb-3"></div>
+    </div>
+    <div class="join-card">
+      <div class="join-logo">
+        <svg class="join-logo-svg" viewBox="0 0 40 40" fill="none">
+          <polygon points="20,3 37,35 3,35" fill="url(#joinGrad)" />
+          <defs>
+            <linearGradient id="joinGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#60a5fa"/>
+              <stop offset="100%" stop-color="#a78bfa"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <div>
+          <div class="join-brand">Antigravity</div>
+          <div class="join-brand-sub">Connect</div>
+        </div>
+      </div>
+
+      <h1 class="join-title">실시간 협업 코딩</h1>
+      <p class="join-desc">팀과 함께 같은 코드를 실시간으로 편집하고, AI와 함께 개발하세요.</p>
+
+      <div class="join-form">
+        <div class="form-group">
+          <label for="input-name">내 이름</label>
+          <input type="text" id="input-name" placeholder="이름을 입력하세요" maxlength="24" autocomplete="off" />
+        </div>
+        <div class="form-group">
+          <label for="input-room">룸 ID</label>
+          <div class="room-input-row">
+            <input type="text" id="input-room" placeholder="my-project-2024" maxlength="48" autocomplete="off" />
+            <button class="btn-random" id="btn-random-room" title="랜덤 생성">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="join-color-picker">
+          <label>커서 색상</label>
+          <div class="color-swatches" id="color-swatches">
+            <button class="swatch active" data-color="#3B82F6" style="background:#3B82F6"></button>
+            <button class="swatch" data-color="#10B981" style="background:#10B981"></button>
+            <button class="swatch" data-color="#F59E0B" style="background:#F59E0B"></button>
+            <button class="swatch" data-color="#EF4444" style="background:#EF4444"></button>
+            <button class="swatch" data-color="#8B5CF6" style="background:#8B5CF6"></button>
+            <button class="swatch" data-color="#EC4899" style="background:#EC4899"></button>
+            <button class="swatch" data-color="#06B6D4" style="background:#06B6D4"></button>
+          </div>
+        </div>
+
+        <button class="btn-join" id="btn-join">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          룸 참가
+        </button>
+      </div>
+
+      <div class="join-features">
+        <div class="feat-item">
+          <div class="feat-icon">⚡</div>
+          <span>실시간 공동 편집</span>
+        </div>
+        <div class="feat-item">
+          <div class="feat-icon">🤖</div>
+          <span>AI 함께 질문</span>
+        </div>
+        <div class="feat-item">
+          <div class="feat-icon">🔗</div>
+          <span>링크 공유만으로 참여</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════
+       MAIN APP
+  ═══════════════════════════════════ -->
+  <div id="app" style="display:none">
+
+    <!-- Title Bar -->
+    <div id="title-bar">
+      <div class="tb-left">
+        <div class="tb-logo">
+          <svg width="22" height="22" viewBox="0 0 40 40" fill="none">
+            <polygon points="20,3 37,35 3,35" fill="url(#tbGrad)" />
+            <defs>
+              <linearGradient id="tbGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#60a5fa"/>
+                <stop offset="100%" stop-color="#a78bfa"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <span class="tb-brand">Antigravity <strong>Connect</strong></span>
+        </div>
+        <div class="tb-room">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          <span id="tb-room-name">—</span>
+        </div>
+      </div>
+
+      <div class="tb-center">
+        <!-- Presence Avatars -->
+        <div class="presence-bar" id="presence-bar"></div>
+      </div>
+
+      <div class="tb-right">
+        <div class="bridge-status" id="bridge-status" title="로컬 Antigravity IDE 연결 상태">
+          <div class="bridge-dot disconnected" id="bridge-dot"></div>
+          <span id="bridge-label">IDE 연결 안됨</span>
+        </div>
+        <button class="tb-btn" id="btn-share" title="링크 복사">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+          링크 복사
+        </button>
+        <button class="tb-btn danger" id="btn-leave" title="나가기">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          나가기
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Layout -->
+    <div id="main-layout">
+
+      <!-- File Tabs + Editor -->
+      <div id="editor-pane">
+        <!-- Tab Bar -->
+        <div id="tab-bar">
+          <div id="tabs-list">
+            <button class="file-tab active" data-file="main">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              main.js
+            </button>
+            <button class="file-tab" data-file="style">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              style.css
+            </button>
+            <button class="file-tab" data-file="readme">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              README.md
+            </button>
+          </div>
+          <div class="tab-bar-right">
+            <span class="collab-count" id="collab-count">1명 편집 중</span>
+          </div>
+        </div>
+
+        <!-- Editor Area -->
+        <div id="editor-area">
+          <div id="line-numbers"></div>
+          <div id="remote-cursors" aria-hidden="true"></div>
+          <textarea
+            id="code-editor"
+            spellcheck="false"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            aria-label="코드 에디터"
+          ></textarea>
+        </div>
+
+        <!-- Status Bar -->
+        <div id="status-bar">
+          <div class="sb-left">
+            <span class="sb-item" id="sb-cursor">Ln 1, Col 1</span>
+            <span class="sb-item" id="sb-lang">JavaScript</span>
+            <span class="sb-item" id="sb-sync">
+              <div class="sync-dot" id="sync-dot"></div>
+              <span id="sync-label">동기화 중...</span>
+            </span>
+          </div>
+          <div class="sb-right">
+            <span class="sb-item">UTF-8</span>
+            <span class="sb-item" id="sb-peers">0명 접속</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Resize Handle -->
+      <div id="resize-handle" aria-hidden="true"></div>
+
+      <!-- AI Chat Panel -->
+      <div id="chat-pane">
+        <div id="chat-header">
+          <div class="chat-header-left">
+            <div class="ai-status-dot" id="ai-status-dot"></div>
+            <span class="chat-title">AI 채팅</span>
+            <span class="chat-shared-badge">공유됨</span>
+          </div>
+          <div class="chat-header-right">
+            <!-- Bridge Connect Button -->
+            <button class="bridge-connect-btn" id="btn-bridge-connect" title="로컬 IDE 연결">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              IDE 연결
+            </button>
+            <!-- Model Selector -->
+            <div class="model-selector" id="model-selector">
+              <button class="model-btn" id="model-btn">
+                <div class="model-indicator"></div>
+                <span id="model-name-display">Gemini 2.0 Flash</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+              </button>
+              <div class="model-dropdown" id="model-dropdown" style="display:none">
+                <div class="model-option active" data-model="gemini-2.0-flash-exp">Gemini 2.0 Flash</div>
+                <div class="model-option" data-model="gemini-2.5-pro">Gemini 2.5 Pro</div>
+                <div class="model-separator"></div>
+                <div class="model-option dimmed" data-model="local-ide">🔌 Antigravity IDE (로컬)</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gemini API Key Notice (shown when no key) -->
+        <div id="api-key-notice" class="api-key-notice">
+          <div class="notice-icon">🔑</div>
+          <p>AI 채팅을 사용하려면 Gemini API 키가 필요합니다.</p>
+          <div class="api-key-input-row">
+            <input type="password" id="api-key-input" placeholder="AIza..." autocomplete="off" />
+            <button id="btn-save-key">저장</button>
+          </div>
+          <a href="https://aistudio.google.com/app/apikey" target="_blank" class="api-key-link">무료 API 키 발급 →</a>
+        </div>
+
+        <div id="chat-history"></div>
+
+        <div id="chat-input-area">
+          <!-- Context Chips -->
+          <div id="context-chips">
+            <button class="ctx-chip active" data-ctx="editor" id="chip-editor">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              현재 코드
+            </button>
+            <button class="ctx-chip" data-ctx="selection" id="chip-selection">선택 영역</button>
+          </div>
+          <div class="chat-input-box" id="chat-input-box">
+            <textarea
+              id="chat-input"
+              placeholder="AI에게 코드에 대해 질문하세요... (Shift+Enter 줄바꿈)"
+              rows="1"
+            ></textarea>
+            <div class="chat-input-row">
+              <button class="chat-send-btn" id="chat-send-btn" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="chat-footer">모든 참가자가 채팅을 볼 수 있습니다</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container"></div>
+
+  <!-- Bridge Setup Modal -->
+  <div id="bridge-modal" style="display:none">
+    <div class="modal-overlay" onclick="closeBridgeModal()"></div>
+    <div class="modal-card">
+      <button class="modal-close" onclick="closeBridgeModal()">✕</button>
+      <h2>🔌 로컬 IDE 연결</h2>
+      <p>Antigravity IDE를 웹앱과 연결하면 IDE의 AI가 채팅에 직접 응답합니다.</p>
+
+      <div class="bridge-steps">
+        <div class="bridge-step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <strong>Antigravity Ask Bridge 확장 설치</strong>
+            <p>Antigravity IDE에서 확장 마켓플레이스를 열고 <code>Antigravity Ask Bridge</code>를 검색해 설치하세요.</p>
+            <a href="https://open-vsx.org/extension/antigravityautomation/antigravity-ask-bridge" target="_blank" class="step-link">확장 페이지 열기 →</a>
+          </div>
+        </div>
+        <div class="bridge-step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <strong>브릿지 스크립트 실행</strong>
+            <p>아래 명령어를 터미널에서 실행하세요 (Node.js 18+ 필요):</p>
+            <div class="code-block" id="bridge-cmd-display">
+              <code>node ag-bridge.mjs --room <span id="bridge-room-display">your-room</span></code>
+              <button class="copy-btn" onclick="copyBridgeCmd()">복사</button>
+            </div>
+            <p class="step-note">ag-bridge.mjs 파일을 먼저 다운로드하세요:</p>
+            <a href="ag-bridge.mjs" download class="step-link">ag-bridge.mjs 다운로드 →</a>
+          </div>
+        </div>
+        <div class="bridge-step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <strong>연결 확인</strong>
+            <p>브릿지가 실행되면 위 상태 표시가 <span style="color:#3FB950">● 연결됨</span>으로 바뀝니다.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="bridge-manual">
+        <p>또는 직접 포트를 지정하세요:</p>
+        <div class="bridge-port-row">
+          <input type="number" id="bridge-port-input" value="5821" min="1000" max="65535" />
+          <button id="btn-connect-bridge">연결 시도</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
