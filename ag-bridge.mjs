@@ -282,6 +282,8 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[Bridge] Listening on ws://127.0.0.1:${PORT}`);
   console.log(`[Bridge] Health: http://127.0.0.1:${PORT}/ping`);
   connectToIDE();
+  // Start workspace file sync polling (every 5s)
+  setInterval(syncWorkspaceFiles, 5000);
 });
 
 // ─── Antigravity IDE Connection ──────────────────
@@ -369,6 +371,28 @@ function connectToIDE() {
     // Suppress console spam if IDE is not open
     // console.error(`[Bridge] IDE error: ${e.message}`);
   });
+}
+
+// ─── Workspace File Sync ──────────────────────────
+let _lastWorkspaceSnapshot = '';
+async function syncWorkspaceFiles() {
+  if (!ideSocket || ideSocket.readyState !== 1) return;
+  try {
+    const data = await getJSON('/workspace/files');
+    if (data.error) return;
+    const snapshot = JSON.stringify(data);
+    if (snapshot === _lastWorkspaceSnapshot) return; // no change
+    _lastWorkspaceSnapshot = snapshot;
+    broadcast({
+      type: 'workspaceFiles',
+      openFiles:        data.openFiles        || [],
+      activeFile:       data.activeFile       || null,
+      workspaceFolders: data.workspaceFolders || [],
+    });
+    console.log(`[Bridge] Workspace sync: ${data.openFiles?.length ?? 0} open files, active=${data.activeFile}`);
+  } catch (e) {
+    // extension may not support /workspace/files yet — silently ignore
+  }
 }
 
 function postJSON(path, obj) {

@@ -158,6 +158,11 @@ function handleBridgeMessage(msg) {
       console.log('[Bridge] File changed:', msg.path);
       break;
 
+    case 'workspaceFiles':
+      // Sync open files and folders from IDE
+      window.dispatchEvent(new CustomEvent('ideWorkspaceFiles', { detail: msg }));
+      break;
+
     case 'ping':
       _ws?.send(JSON.stringify({ type: 'pong' }));
       break;
