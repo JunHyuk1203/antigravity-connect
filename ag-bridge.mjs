@@ -356,49 +356,13 @@ function connectToIDE() {
   });
 }
 
-async function forwardToIDE(id, prompt, requesterWs) {
-  if (!ideSocket || ideSocket.readyState !== 1) {
-    const restResponse = await tryRESTFallback(prompt);
-    if (restResponse) {
-      requesterWs.send(JSON.stringify({ type: 'response', id, text: restResponse }));
-    } else {
-      requesterWs.send(JSON.stringify({
-        type: 'response',
-        id,
-        text: '로컬 Antigravity IDE에 연결되어 있지 않습니다. IDE가 실행 중인지 확인해 주세요.',
-      }));
-    }
-    return;
-  }
-
-  pendingRequests.set(id, { ws: requesterWs });
-
-  ideSocket.send(JSON.stringify({
-    type:  'ask',
-    id,
-    text:  prompt,
-    model: 'auto',
-  }));
-
-  setTimeout(() => {
-    if (pendingRequests.has(id)) {
-      pendingRequests.delete(id);
-      requesterWs.send(JSON.stringify({
-        type: 'response',
-        id,
-        text: 'IDE 응답 시간이 초과됐습니다. Antigravity IDE가 응답 중인지 확인해 주세요.',
-      }));
-    }
-  }, 30000);
-}
-
-async function tryRESTFallback(prompt) {
-  return new Promise((resolve) => {
-    const data = JSON.stringify({ text: prompt });
+function postJSON(path, obj) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(obj);
     const req = http.request({
-      hostname: '127.0.0.1',
-      port: 5820,
-      path: '/ask',
+      hostname: IDE_HOST,
+      port: IDE_PORT - 1, // httpPort is always wsPort - 1 (5820)
+      path: path,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -410,18 +374,146 @@ async function tryRESTFallback(prompt) {
       res.on('data', (chunk) => body += chunk);
       res.on('end', () => {
         try {
-          const parsed = JSON.parse(body);
-          resolve(parsed.text || parsed.response);
-        } catch {
-          resolve(null);
+          resolve(JSON.parse(body));
+        } catch (e) {
+          reject(new Error('Invalid JSON response'));
         }
       });
     });
 
-    req.on('error', () => resolve(null));
+    req.on('error', (e) => reject(e));
     req.write(data);
     req.end();
   });
+}
+
+function getJSON(path) {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: IDE_HOST,
+      port: IDE_PORT - 1,
+      path: path,
+      method: 'GET'
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          reject(new Error('Invalid JSON response'));
+        }
+      });
+    });
+
+    req.on('error', (e) => reject(e));
+    req.end();
+  });
+}
+
+async function forwardToIDE(id, prompt, requesterWs) {
+  if (!ideSocket || ideSocket.readyState !== 1) {
+    requesterWs.send(JSON.stringify({
+      type: 'response',
+      id,
+      text: '로컬 Antigravity IDE에 연결되어 있지 않습니다. IDE가 실행 중인지 확인해 주세요.',
+    }));
+    return;
+  }
+
+  console.log(`[Bridge] Queueing job in IDE...`);
+  
+  let jobId = null;
+  try {
+    const res = await postJSON('/conversations', { text: prompt, model: 'auto' });
+    if (res && res.success && res.job_id) {
+      jobId = res.job_id;
+      console.log(`[Bridge] Job queued successfully, Job ID: ${jobId}`);
+    } else {
+      throw new Error(res?.error || 'Queue failed');
+    }
+  } catch (err) {
+    console.error(`[Bridge] Queue failed:`, err.message);
+    requesterWs.send(JSON.stringify({
+      type: 'response',
+      id,
+      text: `IDE 작업 등록 실패: ${err.message}`,
+    }));
+    return;
+  }
+
+  let pollTimer = null;
+  let timeoutTimer = null;
+  
+  const cleanTimers = () => {
+    if (pollTimer) clearInterval(pollTimer);
+    if (timeoutTimer) clearTimeout(timeoutTimer);
+  };
+
+  timeoutTimer = setTimeout(() => {
+    cleanTimers();
+    requesterWs.send(JSON.stringify({
+      type: 'response',
+      id,
+      text: 'IDE 응답 시간이 초과됐습니다. Antigravity IDE가 다른 작업을 수행 중인지 확인해 주세요.',
+    }));
+  }, 35000);
+
+  pollTimer = setInterval(async () => {
+    try {
+      const job = await getJSON(`/conversations/jobs/${jobId}`);
+      console.log(`[Bridge] Polling job ${jobId} status: ${job?.status}`);
+      
+      if (!job) return;
+      
+      if (job.status === 'completed') {
+        cleanTimers();
+        const convoId = job.conversation_id;
+        
+        console.log(`[Bridge] Job completed! Conversation ID: ${convoId}. Fetching result...`);
+        const convo = await getJSON(`/conversations/${convoId}`);
+        
+        const aiText = extractConversationText(convo);
+        if (aiText) {
+          requesterWs.send(JSON.stringify({ type: 'response', id, text: aiText }));
+        } else {
+          requesterWs.send(JSON.stringify({
+            type: 'response',
+            id,
+            text: 'IDE에서 답변을 수신했으나 빈 답변입니다.',
+          }));
+        }
+      } else if (job.status === 'failed') {
+        cleanTimers();
+        console.error(`[Bridge] Job failed:`, job.error);
+        requesterWs.send(JSON.stringify({
+          type: 'response',
+          id,
+          text: `IDE 처리 오류: ${job.error || '알 수 없음'}`,
+        }));
+      }
+    } catch (err) {
+      console.error(`[Bridge] Polling error:`, err.message);
+    }
+  }, 1000);
+}
+
+function extractConversationText(convo) {
+  const steps = convo?.trajectory?.steps ?? [];
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i];
+    if (step.type === 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') {
+      return step.plannerResponse?.modifiedResponse ?? step.plannerResponse?.response ?? null;
+    }
+    if (step.type === 'CORTEX_STEP_TYPE_MODEL_RESPONSE') {
+      return step.modelResponse?.text ?? null;
+    }
+    if (step.type === 'CORTEX_STEP_TYPE_NOTIFY_USER') {
+      return step.notifyUser?.notificationContent ?? null;
+    }
+  }
+  return null;
 }
 
 function broadcast(msg) {
