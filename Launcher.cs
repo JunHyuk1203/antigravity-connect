@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Text;
+using System.Net;
 
 namespace AntigravityConnect
 {
@@ -134,7 +135,7 @@ namespace AntigravityConnect
             this.Controls.Add(txtLog);
 
             Log("Antigravity Connect 런처 준비 완료.");
-            Log("팁: 호스트로 시작하면 로컬 IDE 브릿지(ag-bridge.mjs)가 자동으로 동시 구동됩니다.");
+            Log("팁: Node.js가 설치되어 있지 않아도 포터블 파일 다운로드를 통해 원클릭 가동이 가능합니다.");
 
             this.FormClosing += LauncherForm_FormClosing;
         }
@@ -202,12 +203,106 @@ namespace AntigravityConnect
                 return;
             }
 
-            Log(string.Format("로컬 IDE 브릿지 구동 시도... (Room: {0})", room));
+            // Check if local node.exe exists
+            string localNodePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "node.exe");
+            if (File.Exists(localNodePath))
+            {
+                StartBridge(room, localNodePath);
+                return;
+            }
+
+            // Test if global node is available
+            try
+            {
+                ProcessStartInfo testPsi = new ProcessStartInfo();
+                testPsi.FileName = "node";
+                testPsi.Arguments = "--version";
+                testPsi.UseShellExecute = false;
+                testPsi.CreateNoWindow = true;
+                using (Process p = Process.Start(testPsi))
+                {
+                    p.WaitForExit(1000);
+                }
+                StartBridge(room, "node");
+            }
+            catch
+            {
+                // Global node not found, offer portable download
+                var result = MessageBox.Show(
+                    "이 컴퓨터에 Node.js가 설치되어 있지 않습니다.\n\n원활한 브릿지 구동을 위해 30MB 크기의 무설정 포터블 Node.js(node.exe)를 현재 폴더에 자동 다운로드하여 실행할까요?\n(직접 설치하지 않고 클릭 한 번으로 간편하게 시작할 수 있습니다.)",
+                    "Node.js 미설치",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question
+                );
+
+                if (result == DialogResult.Yes)
+                {
+                    DownloadPortableNode(room);
+                }
+                else
+                {
+                    Log("❌ 호스트 시작 취소: Node.js가 필요합니다.");
+                }
+            }
+        }
+
+        private void DownloadPortableNode(string room)
+        {
+            string localNodePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "node.exe");
+            Log("포터블 Node.js(node.exe) 다운로드를 시작합니다 (약 30MB)...");
+            btnHost.Enabled = false;
+
+            try
+            {
+                using (WebClient client = new WebClient())
+                {
+                    // Enable TLS 1.2 for Node.js download mirror
+                    ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+
+                    client.DownloadProgressChanged += (s, e) => {
+                        lblStatus.Text = string.Format("포터블 Node.js 다운로드 중... {0}%", e.ProgressPercentage);
+                    };
+
+                    client.DownloadFileCompleted += (s, e) => {
+                        if (e.Error != null)
+                        {
+                            Log("❌ 다운로드 실패: " + e.Error.Message);
+                            lblStatus.Text = "다운로드 실패";
+                            btnHost.Enabled = true;
+                            UpdateHostButtonState(false);
+                            MessageBox.Show("Node.js 다운로드에 실패했습니다. 공식 홈페이지에서 직접 설치해 주세요.", "에러", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            try { Process.Start("https://nodejs.org/"); } catch {}
+                            return;
+                        }
+
+                        Log("✅ 포터블 Node.js 다운로드 완료!");
+                        lblStatus.Text = "다운로드 완료";
+                        btnHost.Enabled = true;
+
+                        // Start bridge with downloaded local node.exe
+                        StartBridge(room, localNodePath);
+                    };
+
+                    client.DownloadFileAsync(new Uri("https://nodejs.org/dist/v20.11.0/win-x64/node.exe"), localNodePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log("❌ 다운로드 오류: " + ex.Message);
+                btnHost.Enabled = true;
+                UpdateHostButtonState(false);
+            }
+        }
+
+        private void StartBridge(string room, string nodePath)
+        {
+            string bridgeScript = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ag-bridge.mjs");
+            Log(string.Format("로컬 IDE 브릿지 구동 시도... (Room: {0}, Executable: {1})", room, nodePath));
 
             try
             {
                 ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = "node";
+                psi.FileName = nodePath;
                 psi.Arguments = string.Format("\"{0}\" --room {1}", bridgeScript, room);
                 psi.RedirectStandardOutput = true;
                 psi.RedirectStandardError = true;
@@ -234,7 +329,7 @@ namespace AntigravityConnect
                 bridgeProcess.BeginOutputReadLine();
                 bridgeProcess.BeginErrorReadLine();
 
-                Log("✅ 브릿지(Node.js) 프로세스 시작 성공!");
+                Log("✅ 브릿지 프로세스 시작 성공!");
                 UpdateHostButtonState(true);
 
                 // Open browser
@@ -244,8 +339,8 @@ namespace AntigravityConnect
             }
             catch (Exception ex)
             {
-                Log(string.Format("❌ 에러: 브릿지 실행 실패. Node.js가 설치되어 있고 환경 변수(PATH)에 등록되어 있는지 확인하세요. ({0})", ex.Message));
-                MessageBox.Show("브릿지(Node.js) 실행에 실패했습니다. 컴퓨터에 Node.js가 설치되어 있는지 확인해 주세요.", "실행 에러", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Log(string.Format("❌ 에러: 브릿지 실행 실패 ({0})", ex.Message));
+                MessageBox.Show("브릿지 실행에 실패했습니다. 파일 권한 또는 실행 경로를 확인해 주세요.", "실행 에러", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
