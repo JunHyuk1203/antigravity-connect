@@ -291,7 +291,6 @@ async function sendMessage() {
     updateInputDisabledState();
   }
 }
-}
 
 function buildContext(userText) {
   const lines = [];
