@@ -20,15 +20,26 @@ export async function initCollab(roomId) {
   // Create Y.js document
   _ydoc = new Y.Doc();
 
-  // Persist to IndexedDB so content survives page refresh
-  const persistence = new IndexeddbPersistence(`ag-connect-${roomId}`, _ydoc);
-  await new Promise(resolve => persistence.on('synced', resolve));
+  // Persist to IndexedDB with a fallback timeout to prevent infinite join hangs in private tabs or slow environments
+  try {
+    const persistence = new IndexeddbPersistence(`ag-connect-${roomId}`, _ydoc);
+    await new Promise(resolve => {
+      let resolved = false;
+      const done = () => { if (!resolved) { resolved = true; resolve(); } };
+      persistence.on('synced', done);
+      setTimeout(done, 2000); // 2-second timeout safety
+    });
+  } catch (e) {
+    console.warn('[Collab] IndexedDB persistence disabled/blocked:', e);
+  }
 
-  // Sync via WebRTC P2P (uses public signaling servers — no backend needed)
+  // Sync via WebRTC P2P (uses multiple public signaling servers for maximum uptime and resilience)
   _provider = new WebrtcProvider(`antigravity-connect-${roomId}`, _ydoc, {
     signaling: [
       'wss://signaling.yjs.dev',
       'wss://y-webrtc-signaling-eu.herokuapp.com',
+      'wss://y-webrtc-signaling-us.herokuapp.com',
+      'wss://y-webrtc.com',
     ],
     maxConns: 20,
     filterBcConns: false, // allow BroadcastChannel for same-origin tabs
