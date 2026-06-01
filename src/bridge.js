@@ -7,7 +7,9 @@
 import { showToast } from './utils.js';
 import { onBridgeMessage } from './chat.js';
 
-const BRIDGE_PORTS = [5821, 5820, 5822, 3000];
+const BRIDGE_PORTS = [5822, 5820, 5821, 3000];
+let _bridgeState = 'disconnected'; // 'connecting', 'connected', 'disconnected'
+let _ideConnected = false;
 let _ws = null;
 let _reconnectTimer = null;
 let _roomId = '';
@@ -56,22 +58,21 @@ export function connect(url, roomId) {
     _ws = null;
   }
 
-  updateBridgeStatus('connecting');
+  setBridgeAndIdeState('connecting', false);
   showToast('🔌 로컬 IDE에 연결 중...', '');
 
   try {
     _ws = new WebSocket(url);
     window.__bridge.ws = _ws;
   } catch {
-    updateBridgeStatus('disconnected');
+    setBridgeAndIdeState('disconnected', false);
     return;
   }
 
   _ws.onopen = () => {
     _connected = true;
-    window.__bridge.connected = true;
-    updateBridgeStatus('connected');
-    showToast('✅ Antigravity IDE 연결됨!', 'success');
+    setBridgeAndIdeState('connected', false);
+    showToast('🔌 로컬 브릿지 연결 성공!', 'success');
 
     if (typeof window.__checkForPendingRequests === 'function') {
       window.__checkForPendingRequests();
@@ -96,9 +97,8 @@ export function connect(url, roomId) {
 
   _ws.onclose = () => {
     _connected = false;
-    window.__bridge.connected = false;
-    updateBridgeStatus('disconnected');
-    showToast('⚠️ IDE 연결이 끊겼습니다', '');
+    setBridgeAndIdeState('disconnected', false);
+    showToast('⚠️ 로컬 브릿지 연결이 끊겼습니다', '');
 
     // Auto-reconnect after 5s
     clearTimeout(_reconnectTimer);
@@ -108,12 +108,34 @@ export function connect(url, roomId) {
   };
 
   _ws.onerror = () => {
-    updateBridgeStatus('disconnected');
+    setBridgeAndIdeState('disconnected', false);
   };
 }
 
 function handleBridgeMessage(msg) {
   switch (msg.type) {
+    case 'status':
+      {
+        const initiallyConnected = _ideConnected;
+        setBridgeAndIdeState('connected', msg.ide);
+        if (msg.ide && !initiallyConnected) {
+          showToast('✅ Antigravity IDE 연결됨!', 'success');
+        }
+      }
+      break;
+
+    case 'ideStatus':
+      {
+        const prevConnected = _ideConnected;
+        setBridgeAndIdeState('connected', msg.connected);
+        if (msg.connected && !prevConnected) {
+          showToast('✅ Antigravity IDE 연결됨!', 'success');
+        } else if (!msg.connected && prevConnected) {
+          showToast('⚠️ IDE 연결이 끊겼습니다', 'error');
+        }
+      }
+      break;
+
     case 'response':
       // AI response from Antigravity IDE
       onBridgeMessage(msg.text);
@@ -133,38 +155,58 @@ function handleBridgeMessage(msg) {
   }
 }
 
-function updateBridgeStatus(state) {
+function setBridgeAndIdeState(bridgeState, ideConnected) {
+  _bridgeState = bridgeState;
+  
+  if (bridgeState !== 'connected') {
+    _ideConnected = false;
+  } else {
+    _ideConnected = ideConnected;
+  }
+
+  const isFullyConnected = (bridgeState === 'connected' && _ideConnected);
+  window.__bridge.connected = isFullyConnected;
+
+  if (window.__presence_provider) {
+    window.__presence_provider.awareness.setLocalStateField('ideConnected', isFullyConnected);
+  }
+
   const dot   = document.getElementById('bridge-dot');
   const label = document.getElementById('bridge-label');
   const aiDot = document.getElementById('ai-status-dot');
 
   if (!dot || !label) return;
 
-  dot.className = `bridge-dot ${state}`;
-
-  const connected = (state === 'connected');
-  window.__bridge.connected = connected;
-  if (window.__presence_provider) {
-    window.__presence_provider.awareness.setLocalStateField('ideConnected', connected);
-  }
-
-  switch (state) {
-    case 'connected':
+  if (bridgeState === 'connecting') {
+    dot.className = 'bridge-dot connecting';
+    label.textContent = '연결 중...';
+    if (aiDot) {
+      aiDot.style.background = '#D29922';
+      aiDot.style.boxShadow = '0 0 6px #D29922';
+    }
+  } else if (bridgeState === 'disconnected') {
+    dot.className = 'bridge-dot disconnected';
+    label.textContent = 'IDE 연결 안됨';
+    if (aiDot) {
+      aiDot.style.background = '#3B82F6';
+      aiDot.style.boxShadow = '0 0 6px #3B82F6';
+    }
+  } else {
+    // bridgeState === 'connected'
+    if (_ideConnected) {
+      dot.className = 'bridge-dot connected';
       label.textContent = 'IDE 연결됨';
       if (aiDot) {
         aiDot.style.background = '#3FB950';
         aiDot.style.boxShadow = '0 0 6px #3FB950';
       }
-      break;
-    case 'connecting':
-      label.textContent = '연결 중...';
-      break;
-    case 'disconnected':
-      label.textContent = 'IDE 연결 안됨';
+    } else {
+      dot.className = 'bridge-dot connecting';
+      label.textContent = 'IDE 연결 대기 중';
       if (aiDot) {
-        aiDot.style.background = '#3B82F6';
-        aiDot.style.boxShadow = '0 0 6px #3B82F6';
+        aiDot.style.background = '#D29922';
+        aiDot.style.boxShadow = '0 0 6px #D29922';
       }
-      break;
+    }
   }
 }

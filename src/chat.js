@@ -457,7 +457,7 @@ window.copyBridgeCmd = function () {
 };
 
 function tryConnectBridge() {
-  const port = document.getElementById('bridge-port-input').value || '5821';
+  const port = document.getElementById('bridge-port-input').value || '5822';
   if (window.__bridge) {
     window.__bridge.connect(`ws://127.0.0.1:${port}`, _APP.roomId);
   }
