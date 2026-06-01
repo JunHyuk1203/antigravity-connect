@@ -712,6 +712,26 @@ a:hover { text-decoration: underline; }
   font-weight: 500;
 }
 
+.host-ide-badge {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.host-ide-badge.online {
+  background: rgba(63,185,80,0.15);
+  border: 1px solid rgba(63,185,80,0.3);
+  color: var(--green);
+}
+.host-ide-badge.offline {
+  background: rgba(248,81,73,0.1);
+  border: 1px solid rgba(248,81,73,0.25);
+  color: var(--red);
+}
+
 .chat-header-right { display: flex; align-items: center; gap: 6px; }
 
 /* Bridge Connect Button */

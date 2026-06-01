@@ -73,6 +73,10 @@ export function connect(url, roomId) {
     updateBridgeStatus('connected');
     showToast('✅ Antigravity IDE 연결됨!', 'success');
 
+    if (typeof window.__checkForPendingRequests === 'function') {
+      window.__checkForPendingRequests();
+    }
+
     // Identify ourselves to the bridge
     _ws.send(JSON.stringify({
       type:   'join',
@@ -137,6 +141,12 @@ function updateBridgeStatus(state) {
   if (!dot || !label) return;
 
   dot.className = `bridge-dot ${state}`;
+
+  const connected = (state === 'connected');
+  window.__bridge.connected = connected;
+  if (window.__presence_provider) {
+    window.__presence_provider.awareness.setLocalStateField('ideConnected', connected);
+  }
 
   switch (state) {
     case 'connected':

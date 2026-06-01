@@ -19,6 +19,7 @@ let _provider = null;
  */
 export function initPresence(provider, myName, myColor) {
   _provider = provider;
+  window.__presence_provider = provider;
 
   // Set own awareness state
   provider.awareness.setLocalStateField('user', {
@@ -28,11 +29,38 @@ export function initPresence(provider, myName, myColor) {
   });
 
   provider.awareness.setLocalStateField('cursor', null);
+  provider.awareness.setLocalStateField('ideConnected', false); // default
 
   // Update presence bar on change
   provider.awareness.on('change', () => {
-    renderAvatars(provider.awareness.getStates());
+    const states = provider.awareness.getStates();
+    renderAvatars(states);
+    updateHostIdeStatus(states);
   });
+}
+
+function updateHostIdeStatus(states) {
+  let hostConnected = false;
+  let hostName = '';
+  states.forEach((state) => {
+    if (state.ideConnected) {
+      hostConnected = true;
+      hostName = state.user?.name || '호스트';
+    }
+  });
+
+  const badge = document.getElementById('host-ide-badge');
+  if (badge) {
+    if (hostConnected) {
+      badge.textContent = `🟢 Host IDE (${hostName})`;
+      badge.className = 'host-ide-badge online';
+    } else {
+      badge.textContent = '🔴 Host IDE 연결 안됨';
+      badge.className = 'host-ide-badge offline';
+    }
+  }
+  window.__hostIdeConnected = { connected: hostConnected, name: hostName };
+}
 
   // Track cursor position in editor
   const editor = document.getElementById('code-editor');
@@ -44,6 +72,7 @@ export function initPresence(provider, myName, myColor) {
 
   // Initial render
   renderAvatars(provider.awareness.getStates());
+  updateHostIdeStatus(provider.awareness.getStates());
 }
 
 function initials(name) {

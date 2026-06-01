@@ -219,6 +219,7 @@
             <div class="ai-status-dot" id="ai-status-dot"></div>
             <span class="chat-title">AI 채팅</span>
             <span class="chat-shared-badge">공유됨</span>
+            <span class="host-ide-badge offline" id="host-ide-badge">🔴 Host IDE 연결 안됨</span>
           </div>
           <div class="chat-header-right">
             <!-- Bridge Connect Button -->
@@ -230,14 +231,15 @@
             <div class="model-selector" id="model-selector">
               <button class="model-btn" id="model-btn">
                 <div class="model-indicator"></div>
-                <span id="model-name-display">Gemini 2.0 Flash</span>
+                <span id="model-name-display">공유 호스트 IDE</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
               <div class="model-dropdown" id="model-dropdown" style="display:none">
-                <div class="model-option active" data-model="gemini-2.0-flash-exp">Gemini 2.0 Flash</div>
+                <div class="model-option active" data-model="shared-ide">🌐 공유 호스트 IDE</div>
+                <div class="model-option" data-model="gemini-2.0-flash-exp">Gemini 2.0 Flash</div>
                 <div class="model-option" data-model="gemini-2.5-pro">Gemini 2.5 Pro</div>
                 <div class="model-separator"></div>
-                <div class="model-option dimmed" data-model="local-ide">🔌 Antigravity IDE (로컬)</div>
+                <div class="model-option dimmed" data-model="local-ide">🔌 개인 로컬 IDE</div>
               </div>
             </div>
           </div>

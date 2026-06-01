@@ -12,8 +12,10 @@ let _ydoc    = null;
 let _ymsg    = null; // Y.Array of message objects
 let _APP     = null;
 let _apiKey  = null;
-let _model   = 'gemini-2.0-flash-exp';
+let _model   = 'shared-ide'; // Default to Shared IDE!
 let _useLocalBridge = false;
+let _useSharedBridge = true; // Default to true!
+let _processingRequests = new Set(); // Host-only to avoid duplicate bridge requests
 
 // ─── Init ────────────────────────────────────────
 export function initChat(ydoc, APP) {
@@ -26,8 +28,16 @@ export function initChat(ydoc, APP) {
   updateAPIKeyUI();
 
   // Observe shared messages and render
-  _ymsg.observe(() => renderMessages());
+  _ymsg.observe(() => {
+    renderMessages();
+    if (window.__bridge?.connected) {
+      checkForPendingRequests();
+    }
+  });
   renderMessages(); // initial
+
+  // Expose check function so bridge.js can trigger it when a local connection succeeds
+  window.__checkForPendingRequests = checkForPendingRequests;
 
   // Input handling
   const chatInput  = document.getElementById('chat-input');
@@ -154,6 +164,45 @@ async function sendMessage() {
   input.value = '';
   input.style.height = 'auto';
   document.getElementById('chat-send-btn').disabled = true;
+
+  if (_model === 'shared-ide') {
+    if (!window.__hostIdeConnected?.connected) {
+      showToast('⚠️ 현재 룸에 연결된 호스트 IDE가 없습니다. 개인 API 키를 등록하거나 호스트 IDE 연결을 기다려 주세요.', 'error');
+      input.value = text;
+      input.style.height = Math.min(input.scrollHeight, 130) + 'px';
+      document.getElementById('chat-send-btn').disabled = false;
+      return;
+    }
+
+    // Build user message
+    const userMsg = {
+      role:     'user',
+      type:     'message',
+      name:     _APP.myName,
+      color:    _APP.myColor,
+      initials: _APP.myName.slice(0,2).toUpperCase(),
+      text,
+      ts:       Date.now(),
+    };
+    _ymsg.push([userMsg]);
+
+    const ctx = buildContext(text);
+
+    // Push pending message to the shared array so the host processes it
+    const pendingId = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
+    const pendingMsg = {
+      id:           pendingId,
+      role:         'ai',
+      type:         'message',
+      name:         'Antigravity AI (공유 호스트)',
+      text:         '⏳ 호스트 IDE의 응답을 대기 중...',
+      status:       'pending',
+      prompt:       ctx,
+      ts:           Date.now(),
+    };
+    _ymsg.push([pendingMsg]);
+    return;
+  }
 
   // Build user message
   const userMsg = {
@@ -369,9 +418,14 @@ function selectModel(opt) {
 
   if (_model === 'local-ide') {
     _useLocalBridge = true;
+    _useSharedBridge = false;
     openBridgeModal();
+  } else if (_model === 'shared-ide') {
+    _useLocalBridge = false;
+    _useSharedBridge = true;
   } else {
     _useLocalBridge = false;
+    _useSharedBridge = false;
   }
 }
 
@@ -396,6 +450,80 @@ function tryConnectBridge() {
   const port = document.getElementById('bridge-port-input').value || '5821';
   if (window.__bridge) {
     window.__bridge.connect(`ws://127.0.0.1:${port}`, _APP.roomId);
+  }
+}
+
+async function checkForPendingRequests() {
+  if (!window.__bridge?.connected) return;
+
+  const msgs = _ymsg.toArray();
+  const pendingIndex = msgs.findIndex(m => m.status === 'pending');
+  if (pendingIndex === -1) return;
+
+  const msg = msgs[pendingIndex];
+  
+  if (_processingRequests.has(msg.id)) return;
+  _processingRequests.add(msg.id);
+
+  console.log(`[Host] Processing pending request: ${msg.id}`);
+
+  // Claim the task
+  const claimedMsg = {
+    ...msg,
+    status: 'processing',
+    hostClientId: _ydoc.clientID.toString(),
+    hostName: _APP.myName,
+    text: `⏳ Antigravity IDE에서 답변을 생성하는 중... (호스트: ${escHtml(_APP.myName)})`,
+  };
+
+  try {
+    _ydoc.transact(() => {
+      const currentMsgs = _ymsg.toArray();
+      const idx = currentMsgs.findIndex(m => m.id === msg.id);
+      if (idx !== -1) {
+        _ymsg.delete(idx, 1);
+        _ymsg.insert(idx, [claimedMsg]);
+      }
+    });
+
+    const response = await sendViaBridge(msg.prompt);
+
+    const finalMsg = {
+      id:   msg.id,
+      role: 'ai',
+      type: 'message',
+      name: `Antigravity AI (via ${claimedMsg.hostName})`,
+      text: response,
+      ts:   Date.now(),
+    };
+
+    _ydoc.transact(() => {
+      const latestMsgs = _ymsg.toArray();
+      const latestIndex = latestMsgs.findIndex(m => m.id === msg.id);
+      if (latestIndex !== -1) {
+        _ymsg.delete(latestIndex, 1);
+        _ymsg.insert(latestIndex, [finalMsg]);
+      }
+    });
+  } catch (err) {
+    console.error('[Host] Error processing pending request:', err);
+    _ydoc.transact(() => {
+      const latestMsgs = _ymsg.toArray();
+      const latestIndex = latestMsgs.findIndex(m => m.id === msg.id);
+      if (latestIndex !== -1) {
+        _ymsg.delete(latestIndex, 1);
+        _ymsg.insert(latestIndex, [{
+          id:   msg.id,
+          role: 'ai',
+          type: 'message',
+          name: 'Antigravity AI',
+          text: `⚠️ 호스트 IDE 처리 중 에러 발생: ${err.message}`,
+          ts:   Date.now(),
+        }]);
+      }
+    });
+  } finally {
+    _processingRequests.delete(msg.id);
   }
 }
 
