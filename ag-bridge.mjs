@@ -1,23 +1,15 @@
 #!/usr/bin/env node
 /**
- * ag-bridge.mjs — Antigravity Connect 로컬 브릿지
+ * ag-bridge.mjs — Antigravity Connect 로컬 브릿지 (100% 무의존성 에디션)
  *
- * 이 스크립트는 사용자의 PC에서 실행하여
- * Antigravity IDE ↔ 웹 앱을 연결합니다.
- *
- * 필요 조건:
- *   - Node.js 18+
- *   - Antigravity IDE 실행 중
- *   - "Antigravity Ask Bridge" 확장 설치
- *     (https://open-vsx.org/extension/antigravityautomation/antigravity-ask-bridge)
- *
- * 실행:
- *   node ag-bridge.mjs --room my-project-2024
- *   node ag-bridge.mjs --room my-project --port 5821 --ide-port 5821
+ * 이 버전은 외부 패키지('ws' 등)에 전혀 의존하지 않으며,
+ * Node.js 내장 모듈(http, net, crypto)만을 사용하여 구현되었습니다.
+ * 따라서 npm install 없이 즉시 단독 실행(node.exe)이 가능합니다.
  */
 
-import { WebSocketServer, WebSocket } from 'ws';
-import { createServer } from 'http';
+import http from 'http';
+import crypto from 'crypto';
+import net from 'net';
 import { argv, exit } from 'process';
 
 // ─── CLI Args ───────────────────────────────────
@@ -41,7 +33,7 @@ const IDE_HOST = args['ide-host'] || '127.0.0.1';
 
 console.log(`
 ╔═══════════════════════════════════════╗
-║     Antigravity Connect — Bridge      ║
+║   Antigravity Connect — Native Bridge ║
 ╚═══════════════════════════════════════╝
   Room:     ${ROOM}
   Listen:   ws://127.0.0.1:${PORT}
@@ -49,14 +41,148 @@ console.log(`
 `);
 
 // ─── State ──────────────────────────────────────
-/** @type {Set<WebSocket>} */
+/** @type {Set<NativeWebSocket>} */
 const webClients = new Set();
 let ideSocket = null;
-let pendingRequests = new Map(); // id → { ws, resolve }
+let pendingRequests = new Map(); // id → { ws }
+
+// ─── Native WebSocket Class ──────────────────────
+class NativeWebSocket {
+  constructor(socket, isClient = false) {
+    this.socket = socket;
+    this.isClient = isClient;
+    this.buffer = Buffer.alloc(0);
+    this.listeners = {};
+    this.readyState = 1; // OPEN
+
+    this.socket.on('data', (chunk) => {
+      this.buffer = Buffer.concat([this.buffer, chunk]);
+      this.parseFrames();
+    });
+
+    this.socket.on('close', () => {
+      this.readyState = 3; // CLOSED
+      this.emit('close');
+    });
+
+    this.socket.on('error', (err) => {
+      this.emit('error', err);
+    });
+  }
+
+  on(event, cb) {
+    this.listeners[event] = this.listeners[event] || [];
+    this.listeners[event].push(cb);
+  }
+
+  emit(event, ...args) {
+    if (this.listeners[event]) {
+      this.listeners[event].forEach(cb => {
+        try { cb(...args); } catch (e) { console.error(e); }
+      });
+    }
+  }
+
+  send(data) {
+    if (this.socket.destroyed || this.readyState !== 1) return;
+    const payload = Buffer.from(data);
+    const len = payload.length;
+
+    let header;
+    if (len <= 125) {
+      header = Buffer.alloc(2);
+      header[0] = 0x81; // FIN + Opcode 1 (Text)
+      header[1] = this.isClient ? (0x80 | len) : len;
+    } else if (len <= 65535) {
+      header = Buffer.alloc(4);
+      header[0] = 0x81;
+      header[1] = this.isClient ? (0x80 | 126) : 126;
+      header.writeUInt16BE(len, 2);
+    } else {
+      header = Buffer.alloc(10);
+      header[0] = 0x81;
+      header[1] = this.isClient ? (0x80 | 127) : 127;
+      header.writeBigUInt64BE(BigInt(len), 2);
+    }
+
+    if (this.isClient) {
+      const mask = crypto.randomBytes(4);
+      const masked = Buffer.alloc(len);
+      for (let i = 0; i < len; i++) {
+        masked[i] = payload[i] ^ mask[i % 4];
+      }
+      this.socket.write(Buffer.concat([header, mask, masked]));
+    } else {
+      this.socket.write(Buffer.concat([header, payload]));
+    }
+  }
+
+  close() {
+    this.readyState = 2; // CLOSING
+    this.socket.end();
+  }
+
+  parseFrames() {
+    while (this.buffer.length >= 2) {
+      const firstByte = this.buffer[0];
+      const secondByte = this.buffer[1];
+      
+      const fin = (firstByte & 0x80) !== 0;
+      const opcode = firstByte & 0x0F;
+      const hasMask = (secondByte & 0x80) !== 0;
+      let payloadLen = secondByte & 0x7F;
+
+      if (opcode === 8) { // Connection Close
+        this.socket.end();
+        return;
+      }
+
+      let headerOffset = 2;
+      if (payloadLen === 126) {
+        if (this.buffer.length < 4) return;
+        payloadLen = this.buffer.readUInt16BE(2);
+        headerOffset = 4;
+      } else if (payloadLen === 127) {
+        if (this.buffer.length < 10) return;
+        payloadLen = Number(this.buffer.readBigUInt64BE(2));
+        headerOffset = 10;
+      }
+
+      let maskKeyOffset = headerOffset;
+      if (hasMask) {
+        headerOffset += 4;
+      }
+
+      const totalFrameLen = headerOffset + payloadLen;
+      if (this.buffer.length < totalFrameLen) return;
+
+      const payload = this.buffer.subarray(headerOffset, totalFrameLen);
+      let dataBuffer = payload;
+
+      if (hasMask) {
+        const maskKey = this.buffer.subarray(maskKeyOffset, maskKeyOffset + 4);
+        dataBuffer = Buffer.alloc(payloadLen);
+        for (let i = 0; i < payloadLen; i++) {
+          dataBuffer[i] = payload[i] ^ maskKey[i % 4];
+        }
+      }
+
+      if (opcode === 9) { // Ping
+        const pongHeader = Buffer.alloc(2);
+        pongHeader[0] = 0x8A; // FIN + Pong Opcode
+        pongHeader[1] = 0;
+        this.socket.write(pongHeader);
+      } else if (opcode === 1) { // Text Message
+        this.emit('message', dataBuffer.toString());
+      }
+
+      this.buffer = this.buffer.subarray(totalFrameLen);
+    }
+  }
+}
 
 // ─── WebSocket Server (for web app) ─────────────
-const server = createServer((req, res) => {
-  // Simple health endpoint
+const server = http.createServer((req, res) => {
   if (req.url === '/ping') {
     res.writeHead(200, {
       'Content-Type': 'text/plain',
@@ -69,23 +195,43 @@ const server = createServer((req, res) => {
   res.end();
 });
 
-const wss = new WebSocketServer({
-  server,
-  // Allow connections from GitHub Pages and localhost
-  verifyClient: ({ origin }) => {
-    const allowed = [
-      'http://localhost',
-      'http://127.0.0.1',
-      'https://github.io',
-      null, // no origin (e.g., node clients)
-    ];
-    if (!origin) return true;
-    return allowed.some(a => !a || origin.startsWith(a)) || origin.includes('github.io');
-  },
-});
+server.on('upgrade', (req, socket) => {
+  const origin = req.headers['origin'] || '';
+  const allowed = [
+    'http://localhost',
+    'http://127.0.0.1',
+    'https://github.io',
+  ];
+  
+  const isAllowed = !origin || allowed.some(a => origin.startsWith(a)) || origin.includes('github.io');
+  if (!isAllowed) {
+    socket.destroy();
+    return;
+  }
 
-wss.on('connection', (ws, req) => {
-  console.log(`[Bridge] Web client connected from ${req.socket.remoteAddress}`);
+  const key = req.headers['sec-websocket-key'];
+  if (!key) {
+    socket.destroy();
+    return;
+  }
+
+  const acceptKey = crypto
+    .createHash('sha1')
+    .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+    .digest('base64');
+
+  const headers = [
+    'HTTP/1.1 101 Switching Protocols',
+    'Upgrade: websocket',
+    'Connection: Upgrade',
+    `Sec-WebSocket-Accept: ${acceptKey}`,
+    '\r\n'
+  ];
+
+  socket.write(headers.join('\r\n'));
+
+  const ws = new NativeWebSocket(socket, false);
+  console.log(`[Bridge] Web client connected`);
   webClients.add(ws);
 
   ws.on('message', async (raw) => {
@@ -95,19 +241,15 @@ wss.on('connection', (ws, req) => {
     switch (msg.type) {
       case 'join':
         console.log(`[Bridge] Client joined room: ${msg.room}`);
-        // Send current IDE connection status
         ws.send(JSON.stringify({
           type: 'status',
-          ide: ideSocket?.readyState === WebSocket.OPEN,
+          ide: ideSocket !== null && ideSocket.readyState === 1,
         }));
         break;
 
       case 'ask':
         console.log(`[Bridge] Ask from web: "${msg.prompt?.slice(0, 60)}..."`);
         await forwardToIDE(msg.id, msg.prompt, ws);
-        break;
-
-      case 'pong':
         break;
 
       default:
@@ -119,8 +261,6 @@ wss.on('connection', (ws, req) => {
     webClients.delete(ws);
     console.log(`[Bridge] Web client disconnected`);
   });
-
-  ws.on('error', (e) => console.error('[Bridge] WS error:', e.message));
 });
 
 server.listen(PORT, '127.0.0.1', () => {
@@ -133,48 +273,91 @@ server.listen(PORT, '127.0.0.1', () => {
 function connectToIDE() {
   console.log(`[Bridge] Connecting to Antigravity IDE at ws://${IDE_HOST}:${IDE_PORT}...`);
 
-  ideSocket = new WebSocket(`ws://${IDE_HOST}:${IDE_PORT}`);
+  const rawSocket = net.connect(IDE_PORT, IDE_HOST);
+  let ws = null;
+  let handshakeDone = false;
 
-  ideSocket.on('open', () => {
-    console.log(`[Bridge] ✅ Connected to Antigravity IDE`);
-    broadcast({ type: 'ideStatus', connected: true });
+  rawSocket.on('connect', () => {
+    const key = crypto.randomBytes(16).toString('base64');
+    const handshakeReq = [
+      `GET / HTTP/1.1`,
+      `Host: ${IDE_HOST}:${IDE_PORT}`,
+      `Upgrade: websocket`,
+      `Connection: Upgrade`,
+      `Sec-WebSocket-Key: ${key}`,
+      `Sec-WebSocket-Version: 13`,
+      `\r\n`
+    ].join('\r\n');
+    rawSocket.write(handshakeReq);
   });
 
-  ideSocket.on('message', (raw) => {
-    let msg;
-    try { msg = JSON.parse(raw.toString()); } catch { return; }
+  rawSocket.on('data', (chunk) => {
+    if (!handshakeDone) {
+      const resp = chunk.toString();
+      if (resp.startsWith('HTTP/1.1 101')) {
+        handshakeDone = true;
+        ws = new NativeWebSocket(rawSocket, true);
+        ideSocket = ws;
+        
+        console.log(`[Bridge] ✅ Connected to Antigravity IDE`);
+        broadcast({ type: 'ideStatus', connected: true });
 
-    // Response from IDE → forward to requesting web client
-    if (msg.type === 'response' || msg.text) {
-      const reqId = msg.id || msg.requestId;
-      if (reqId && pendingRequests.has(reqId)) {
-        const { ws } = pendingRequests.get(reqId);
-        pendingRequests.delete(reqId);
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'response', id: reqId, text: msg.text }));
+        // Feed remaining data if there's any body frame after HTTP headers
+        const headerEnd = chunk.indexOf('\r\n\r\n');
+        if (headerEnd !== -1) {
+          const remainder = chunk.subarray(headerEnd + 4);
+          if (remainder.length > 0) {
+            ws.buffer = remainder;
+            ws.parseFrames();
+          }
         }
+
+        ws.on('message', (rawMsg) => {
+          let msg;
+          try { msg = JSON.parse(rawMsg); } catch { return; }
+
+          if (msg.type === 'response' || msg.text) {
+            const reqId = msg.id || msg.requestId;
+            if (reqId && pendingRequests.has(reqId)) {
+              const { ws: clientWs } = pendingRequests.get(reqId);
+              pendingRequests.delete(reqId);
+              if (clientWs.readyState === 1) {
+                clientWs.send(JSON.stringify({ type: 'response', id: reqId, text: msg.text }));
+              }
+            } else {
+              broadcast({ type: 'response', text: msg.text || msg.response });
+            }
+          }
+        });
+
+        ws.on('close', () => {
+          ideSocket = null;
+          console.log('[Bridge] IDE connection closed. Retrying in 5s...');
+          broadcast({ type: 'ideStatus', connected: false });
+          setTimeout(connectToIDE, 5000);
+        });
       } else {
-        // Broadcast to all web clients
-        broadcast({ type: 'response', text: msg.text || msg.response });
+        console.error('[Bridge] IDE Handshake failed: ' + resp);
+        rawSocket.destroy();
       }
     }
   });
 
-  ideSocket.on('close', () => {
-    console.log('[Bridge] IDE connection closed. Retrying in 5s...');
-    broadcast({ type: 'ideStatus', connected: false });
-    setTimeout(connectToIDE, 5000);
+  rawSocket.on('close', () => {
+    if (!handshakeDone) {
+      console.log('[Bridge] IDE connection closed before handshake. Retrying in 5s...');
+      setTimeout(connectToIDE, 5000);
+    }
   });
 
-  ideSocket.on('error', (e) => {
-    console.error(`[Bridge] IDE error: ${e.message}`);
-    console.log('[Bridge] Make sure Antigravity Ask Bridge extension is running.');
+  rawSocket.on('error', (e) => {
+    // Suppress console spam if IDE is not open
+    // console.error(`[Bridge] IDE error: ${e.message}`);
   });
 }
 
 async function forwardToIDE(id, prompt, requesterWs) {
-  if (!ideSocket || ideSocket.readyState !== WebSocket.OPEN) {
-    // No IDE — try Antigravity REST API fallback
+  if (!ideSocket || ideSocket.readyState !== 1) {
     const restResponse = await tryRESTFallback(prompt);
     if (restResponse) {
       requesterWs.send(JSON.stringify({ type: 'response', id, text: restResponse }));
@@ -182,16 +365,14 @@ async function forwardToIDE(id, prompt, requesterWs) {
       requesterWs.send(JSON.stringify({
         type: 'response',
         id,
-        text: '로컬 Antigravity IDE에 연결되어 있지 않습니다. IDE가 실행 중인지, Antigravity Ask Bridge 확장이 설치됐는지 확인해 주세요.',
+        text: '로컬 Antigravity IDE에 연결되어 있지 않습니다. IDE가 실행 중인지 확인해 주세요.',
       }));
     }
     return;
   }
 
-  // Track this request
   pendingRequests.set(id, { ws: requesterWs });
 
-  // Send to IDE (Ask Bridge format)
   ideSocket.send(JSON.stringify({
     type:  'ask',
     id,
@@ -199,7 +380,6 @@ async function forwardToIDE(id, prompt, requesterWs) {
     model: 'auto',
   }));
 
-  // Timeout
   setTimeout(() => {
     if (pendingRequests.has(id)) {
       pendingRequests.delete(id);
@@ -213,31 +393,48 @@ async function forwardToIDE(id, prompt, requesterWs) {
 }
 
 async function tryRESTFallback(prompt) {
-  try {
-    const res = await fetch(`http://127.0.0.1:5820/ask`, {
+  return new Promise((resolve) => {
+    const data = JSON.stringify({ text: prompt });
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port: 5820,
+      path: '/ask',
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: prompt }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
+    }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => body += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(body);
+          resolve(parsed.text || parsed.response);
+        } catch {
+          resolve(null);
+        }
+      });
     });
-    if (res.ok) {
-      const data = await res.json();
-      return data.text || data.response;
-    }
-  } catch {}
-  return null;
+
+    req.on('error', () => resolve(null));
+    req.write(data);
+    req.end();
+  });
 }
 
 function broadcast(msg) {
   const json = JSON.stringify(msg);
   webClients.forEach(ws => {
-    if (ws.readyState === WebSocket.OPEN) ws.send(json);
+    if (ws.readyState === 1) ws.send(json);
   });
 }
 
 // ─── Graceful shutdown ───────────────────────────
 process.on('SIGINT', () => {
   console.log('\n[Bridge] Shutting down...');
-  wss.close();
+  server.close();
   ideSocket?.close();
   exit(0);
 });
