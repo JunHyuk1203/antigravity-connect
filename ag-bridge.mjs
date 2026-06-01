@@ -282,8 +282,6 @@ server.listen(PORT, '127.0.0.1', () => {
   console.log(`[Bridge] Listening on ws://127.0.0.1:${PORT}`);
   console.log(`[Bridge] Health: http://127.0.0.1:${PORT}/ping`);
   connectToIDE();
-  // Start workspace file sync polling (every 5s)
-  setInterval(syncWorkspaceFiles, 5000);
 });
 
 // ─── Antigravity IDE Connection ──────────────────
@@ -373,27 +371,6 @@ function connectToIDE() {
   });
 }
 
-// ─── Workspace File Sync ──────────────────────────
-let _lastWorkspaceSnapshot = '';
-async function syncWorkspaceFiles() {
-  if (!ideSocket || ideSocket.readyState !== 1) return;
-  try {
-    const data = await getJSON('/workspace/files');
-    if (data.error) return;
-    const snapshot = JSON.stringify(data);
-    if (snapshot === _lastWorkspaceSnapshot) return; // no change
-    _lastWorkspaceSnapshot = snapshot;
-    broadcast({
-      type: 'workspaceFiles',
-      openFiles:        data.openFiles        || [],
-      activeFile:       data.activeFile       || null,
-      workspaceFolders: data.workspaceFolders || [],
-    });
-    console.log(`[Bridge] Workspace sync: ${data.openFiles?.length ?? 0} open files, active=${data.activeFile}`);
-  } catch (e) {
-    // extension may not support /workspace/files yet — silently ignore
-  }
-}
 
 function postJSON(path, obj) {
   return new Promise((resolve, reject) => {
@@ -640,12 +617,12 @@ async function forwardToIDE(id, prompt, modelId, requesterWs) {
           requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: 'ok' }));
         } else {
           const errStep = newSteps.findLast(s => s.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE');
-          const userErrMsg = errStep?.errorMessage?.error?.userErrorMessage;
+          const userErrMsg = convo?.executionError || errStep?.errorMessage?.error?.userErrorMessage || errStep?.errorMessage?.error?.message;
           const errorCode = errStep?.errorMessage?.error?.errorCode;
           let modelStatus = 'unavailable';
           let fallbackText = 'IDE에서 응답을 받지 못했습니다.';
           if (userErrMsg) {
-            if (errorCode === 429 || userErrMsg.includes('quota')) {
+            if (errorCode === 429 || userErrMsg.includes('quota') || userErrMsg.includes('Quota') || userErrMsg.includes('RESOURCE_EXHAUSTED')) {
               modelStatus = 'quota_exceeded';
               fallbackText = `⚠️ 한도 초과: ${userErrMsg}`;
             } else {
@@ -707,12 +684,12 @@ async function pollJobToCompletion(id, jobId, resolvedModel, requesterWs) {
                 requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: 'ok' }));
               } else {
                 const errStep = (convo?.trajectory?.steps ?? []).findLast(s => s.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE');
-                const userErrMsg = errStep?.errorMessage?.error?.userErrorMessage;
+                const userErrMsg = convo?.executionError || errStep?.errorMessage?.error?.userErrorMessage || errStep?.errorMessage?.error?.message;
                 const errorCode = errStep?.errorMessage?.error?.errorCode;
                 let modelStatus = 'unavailable';
                 let fallbackText = 'IDE에서 응답을 받지 못했습니다.';
                 if (userErrMsg) {
-                  if (errorCode === 429 || userErrMsg.includes('quota') || userErrMsg.includes('Quota')) {
+                  if (errorCode === 429 || userErrMsg.includes('quota') || userErrMsg.includes('Quota') || userErrMsg.includes('RESOURCE_EXHAUSTED')) {
                     modelStatus = 'quota_exceeded';
                     fallbackText = `⚠️ 한도 초과: ${userErrMsg}`;
                   } else {

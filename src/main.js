@@ -145,8 +145,7 @@ async function startApp() {
   initBridge(APP);
   if (window.debugLog) window.debugLog("🎉 [성공] 룸 접속 및 전 시스템 연동이 성공적으로 완료되었습니다!");
 
-  // 6. IDE Workspace File Sync
-  setupWorkspaceFileSync();
+
 
   // Initialize Resize Handle for Chat Pane
   setupResizeHandle();
@@ -212,79 +211,4 @@ if (document.readyState === 'loading') {
   setupJoinScreen();
 }
 
-// ─── IDE Workspace File Sync ─────────────────────
-function setupWorkspaceFileSync() {
-  window.addEventListener('ideWorkspaceFiles', (e) => {
-    const { openFiles = [], activeFile = null, workspaceFolders = [] } = e.detail;
 
-    // ── 탭 바: IDE 탭 구역 업데이트 ──────────────
-    const tabsList = document.getElementById('tabs-list');
-    if (!tabsList) return;
-
-    // 기존 IDE 탭들 제거
-    tabsList.querySelectorAll('.file-tab.ide-tab').forEach(t => t.remove());
-
-    if (openFiles.length > 0) {
-      // 구분선
-      let sep = tabsList.querySelector('.ide-tab-sep');
-      if (!sep) {
-        sep = document.createElement('div');
-        sep.className = 'ide-tab-sep';
-        sep.title = 'IDE에서 열린 파일';
-        tabsList.appendChild(sep);
-      }
-
-      openFiles.forEach(filePath => {
-        const fileName = filePath.split(/[\\/]/).pop();
-        const isActive = filePath === activeFile;
-
-        const tab = document.createElement('button');
-        tab.className = 'file-tab ide-tab' + (isActive ? ' ide-active' : '');
-        tab.dataset.idePath = filePath;
-        tab.title = filePath;
-
-        // 파일 아이콘 색상
-        const ext = fileName.split('.').pop().toLowerCase();
-        const iconColor = ext === 'js' || ext === 'ts' || ext === 'mjs' ? '#F0DB4F'
-          : ext === 'css' || ext === 'scss' ? '#264de4'
-          : ext === 'html' ? '#e34c26'
-          : ext === 'json' ? '#cbcb41'
-          : ext === 'md' ? '#9ca3af'
-          : ext === 'py' ? '#3572A5'
-          : '#8B949E';
-
-        tab.innerHTML = `
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-          </svg>
-          ${escHtml(fileName)}`;
-
-        tab.addEventListener('click', () => {
-          // 현재는 IDE 파일 내용을 읽을 수 없으므로 경로만 토스트로 표시
-          showToast(`📂 ${fileName}\n${filePath}`, '');
-        });
-
-        tabsList.appendChild(tab);
-      });
-    } else {
-      // 열린 파일 없으면 구분선도 제거
-      tabsList.querySelector('.ide-tab-sep')?.remove();
-    }
-
-    // ── 워크스페이스 뱃지 ──────────────────────────
-    const tbRoom = document.getElementById('tb-room-name');
-    if (tbRoom && workspaceFolders.length > 0) {
-      const folderNames = workspaceFolders.map(f => f.name).join(', ');
-      let badge = document.getElementById('workspace-badge');
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.id = 'workspace-badge';
-        badge.className = 'workspace-badge';
-        tbRoom.parentElement.appendChild(badge);
-      }
-      badge.textContent = `📁 ${folderNames}`;
-      badge.title = workspaceFolders.map(f => f.path).join('\n');
-    }
-  });
-}
