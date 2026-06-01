@@ -444,10 +444,12 @@ async function forwardToIDE(id, prompt, requesterWs) {
   }
 
   let pollTimer = null;
+  let convoPollTimer = null;
   let timeoutTimer = null;
   
   const cleanTimers = () => {
     if (pollTimer) clearInterval(pollTimer);
+    if (convoPollTimer) clearInterval(convoPollTimer);
     if (timeoutTimer) clearTimeout(timeoutTimer);
   };
 
@@ -458,7 +460,7 @@ async function forwardToIDE(id, prompt, requesterWs) {
       id,
       text: 'IDE 응답 시간이 초과됐습니다. Antigravity IDE가 다른 작업을 수행 중인지 확인해 주세요.',
     }));
-  }, 35000);
+  }, 45000); // 45 seconds overall timeout to allow full generation
 
   pollTimer = setInterval(async () => {
     try {
@@ -468,22 +470,40 @@ async function forwardToIDE(id, prompt, requesterWs) {
       if (!job) return;
       
       if (job.status === 'completed') {
-        cleanTimers();
+        clearInterval(pollTimer);
+        pollTimer = null;
+        
         const convoId = job.conversation_id;
+        console.log(`[Bridge] Job queued successfully in IDE! Conversation ID: ${convoId}. Waiting for AI response generation...`);
         
-        console.log(`[Bridge] Job completed! Conversation ID: ${convoId}. Fetching result...`);
-        const convo = await getJSON(`/conversations/${convoId}`);
+        let attempts = 0;
+        const maxAttempts = 35; // wait up to 35 seconds for AI to write steps
         
-        const aiText = extractConversationText(convo);
-        if (aiText) {
-          requesterWs.send(JSON.stringify({ type: 'response', id, text: aiText }));
-        } else {
-          requesterWs.send(JSON.stringify({
-            type: 'response',
-            id,
-            text: 'IDE에서 답변을 수신했으나 빈 답변입니다.',
-          }));
-        }
+        convoPollTimer = setInterval(async () => {
+          attempts++;
+          try {
+            const convo = await getJSON(`/conversations/${convoId}`);
+            const aiText = extractConversationText(convo);
+            
+            console.log(`[Bridge] Polling AI response (attempt ${attempts}/${maxAttempts})...`);
+            
+            if (aiText) {
+              cleanTimers();
+              console.log(`[Bridge] AI Response successfully retrieved! Sending to client.`);
+              requesterWs.send(JSON.stringify({ type: 'response', id, text: aiText }));
+            } else if (attempts >= maxAttempts) {
+              cleanTimers();
+              console.warn(`[Bridge] AI Response timeout. Trajectory steps:`, convo?.trajectory?.steps);
+              requesterWs.send(JSON.stringify({
+                type: 'response',
+                id,
+                text: 'IDE에서 대화를 열었으나, AI가 답변을 작성하지 못했거나 시간이 초과되었습니다.',
+              }));
+            }
+          } catch (convoErr) {
+            console.error(`[Bridge] Conversation polling error:`, convoErr.message);
+          }
+        }, 1000);
       } else if (job.status === 'failed') {
         cleanTimers();
         console.error(`[Bridge] Job failed:`, job.error);
