@@ -33,11 +33,11 @@ https://JunHyuk1203.github.io/antigravity-connect/#room=team-collab-space
 
 ## 🚀 사용 가이드 (1초만에 룸 시작하기)
 
-### 방법 A: 데스크톱 런처 (`AntigravityConnect.exe`) 사용 (가장 추천! 👍)
+### 방법 A: 데스크톱 런처 (`AntigravityRoom.exe`) 사용 (가장 추천! 👍)
 
 Windows 사용자를 위해 복잡한 터미널 명령어나 Node.js 설치 확인 과정을 단 한 번의 클릭으로 자동화해주는 native 실행 파일(`.exe`)을 제공합니다.
 
-1. 이 저장소 최상위 경로에 있는 **[AntigravityConnect.exe](AntigravityConnect.exe)**를 실행합니다.
+1. 이 저장소 최상위 경로에 있는 **[AntigravityRoom.exe](AntigravityRoom.exe)**를 실행합니다.
 2. 원하는 **ROOM ID**를 적어 넣거나 "랜덤 생성" 버튼을 클릭합니다.
 3. **🚀 호스트 모드로 시작** 버튼을 클릭합니다.
    * *배후에서 로컬 `ag-bridge.mjs` 백그라운드 프로세스가 자동 실행되며, 팀원들과의 실시간 연동 및 로컬 IDE AI 통신이 즉시 준비됩니다.*
