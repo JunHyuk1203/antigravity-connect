@@ -447,80 +447,165 @@ function isCascadeIdle(listData, conversationId) {
 async function forwardToIDE(id, prompt, modelId, requesterWs) {
   if (!ideSocket || ideSocket.readyState !== 1) {
     requesterWs.send(JSON.stringify({
-      type: 'response',
-      id,
-      text: '로컬 Antigravity IDE에 연결되어 있지 않습니다. IDE가 실행 중인지 확인해 주세요.',
+      type: 'response', id,
+      text: '로컬 Antigravity IDE에 연결되어 있지 않습니다.',
     }));
     return;
   }
 
   const resolvedModel = (typeof modelId === 'number' && modelId > 0) ? modelId : DEFAULT_MODEL;
-  console.log(`[Bridge] Queueing job in IDE with model=${resolvedModel}...`);
-  
-  let jobId = null;
+
+  // ── Step 1: 현재 IDE에 열린 활성 대화 ID 조회 ──────────────────────────
+  let activeConvoId = null;
   try {
-    const result = await postJSON('/conversations', { text: prompt, model: resolvedModel });
-    const res = result.data;
-    if (res && res.success && res.job_id) {
-      jobId = res.job_id;
-      console.log(`[Bridge] Job queued successfully, Job ID: ${jobId}`);
-    } else {
-      throw new Error(res?.error || `HTTP ${result.statusCode}`);
+    const activeRes = await getJSON('/conversations/active');
+    activeConvoId = activeRes?.conversation_id ?? null;
+    if (activeConvoId) {
+      console.log(`[Bridge] Active conversation in IDE: ${activeConvoId}`);
     }
-  } catch (err) {
-    console.error(`[Bridge] Queue failed:`, err.message);
-    requesterWs.send(JSON.stringify({
-      type: 'response',
-      id,
-      text: `IDE 작업 등록 실패: ${err.message}`,
-    }));
+  } catch (e) {
+    console.warn('[Bridge] /conversations/active failed:', e.message);
+  }
+
+  // ── Step 2: 활성 대화가 없으면 새 대화 생성 (폴백) ───────────────────────
+  if (!activeConvoId) {
+    console.log('[Bridge] No active conversation. Creating new one...');
+    let jobId = null;
+    try {
+      const result = await postJSON('/conversations', { text: prompt, model: resolvedModel });
+      const res = result.data;
+      if (res?.success && res.job_id) {
+        jobId = res.job_id;
+        console.log(`[Bridge] New job: ${jobId}`);
+      } else {
+        throw new Error(res?.error || `HTTP ${result.statusCode}`);
+      }
+    } catch (err) {
+      requesterWs.send(JSON.stringify({ type: 'response', id, text: `IDE 연결 실패: ${err.message}` }));
+      return;
+    }
+    await pollJobToCompletion(id, jobId, resolvedModel, requesterWs);
     return;
   }
 
+  // ── Step 3: 기존 대화의 현재 스텝 수를 기록 ──────────────────────────────
+  let stepCountBefore = 0;
+  try {
+    const convo = await getJSON(`/conversations/${activeConvoId}`);
+    stepCountBefore = convo?.trajectory?.steps?.length ?? 0;
+    console.log(`[Bridge] Sending to active convo (${stepCountBefore} existing steps)`);
+  } catch (e) {
+    console.warn('[Bridge] Could not get step count:', e.message);
+  }
+
+  // ── Step 4: 활성 대화에 메시지 전송 ──────────────────────────────────────
+  try {
+    const result = await postJSON(`/conversations/${activeConvoId}/message`, {
+      text: prompt,
+      model: resolvedModel,
+    });
+    if (!result.data?.success) {
+      throw new Error(result.data?.error || `HTTP ${result.statusCode}`);
+    }
+    console.log(`[Bridge] ✅ Message sent to active conversation`);
+  } catch (err) {
+    console.error('[Bridge] Send message failed:', err.message);
+    requesterWs.send(JSON.stringify({ type: 'response', id, text: `메시지 전송 실패: ${err.message}` }));
+    return;
+  }
+
+  // ── Step 5: 새 응답 스텝이 생길 때까지 폴링 ──────────────────────────────
+  let done = false;
+  let attempts = 0;
+  const maxAttempts = 90; // 90초
+
+  const timeoutTimer = setTimeout(() => {
+    done = true;
+    requesterWs.send(JSON.stringify({ type: 'response', id, text: 'IDE 응답 대기 시간이 초과됐습니다.' }));
+  }, 92000);
+
+  const pollTimer = setInterval(async () => {
+    if (done) { clearInterval(pollTimer); return; }
+    attempts++;
+    try {
+      const [convo, convoList] = await Promise.all([
+        getJSON(`/conversations/${activeConvoId}`),
+        listConversations().catch(() => null),
+      ]);
+      const steps = convo?.trajectory?.steps ?? [];
+      const newStepCount = steps.length;
+      const finished = isConversationFinished(convo);
+      const idle = convoList ? isCascadeIdle(convoList, activeConvoId) : true;
+
+      console.log(`[Bridge] Poll ${attempts}/${maxAttempts}: steps=${newStepCount}(+${newStepCount - stepCountBefore}), finished=${finished}, idle=${idle}`);
+
+      // 새 스텝이 생겼고 대화가 완료됐을 때
+      if (newStepCount > stepCountBefore && finished && idle) {
+        done = true;
+        clearInterval(pollTimer);
+        clearTimeout(timeoutTimer);
+
+        // 새 스텝만 추출
+        const newSteps = steps.slice(stepCountBefore);
+        const fakeConvo = { ...convo, trajectory: { ...convo.trajectory, steps: newSteps } };
+        const result = extractConversationText(fakeConvo);
+
+        if (result) {
+          console.log('[Bridge] ✅ Got new AI response from active conversation!');
+          requesterWs.send(JSON.stringify({ type: 'response', id, text: result }));
+          requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: 'ok' }));
+        } else {
+          const errStep = newSteps.findLast(s => s.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE');
+          const userErrMsg = errStep?.errorMessage?.error?.userErrorMessage;
+          const errorCode = errStep?.errorMessage?.error?.errorCode;
+          let modelStatus = 'unavailable';
+          let fallbackText = 'IDE에서 응답을 받지 못했습니다.';
+          if (userErrMsg) {
+            if (errorCode === 429 || userErrMsg.includes('quota')) {
+              modelStatus = 'quota_exceeded';
+              fallbackText = `⚠️ 한도 초과: ${userErrMsg}`;
+            } else {
+              fallbackText = `⚠️ IDE 오류: ${userErrMsg}`;
+            }
+          }
+          requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: modelStatus }));
+          requesterWs.send(JSON.stringify({ type: 'response', id, text: fallbackText }));
+        }
+      } else if (attempts >= maxAttempts) {
+        done = true;
+        clearInterval(pollTimer);
+        clearTimeout(timeoutTimer);
+        requesterWs.send(JSON.stringify({ type: 'response', id, text: 'IDE 응답 대기 시간이 초과됐습니다.' }));
+      }
+    } catch (err) {
+      console.error('[Bridge] Poll error:', err.message);
+    }
+  }, 1000);
+}
+
+// ── 새 대화(job) 완료 폴링 (폴백) ─────────────────────────────────────────
+async function pollJobToCompletion(id, jobId, resolvedModel, requesterWs) {
   let pollTimer = null;
   let convoPollTimer = null;
   let timeoutTimer = null;
-  
-  const cleanTimers = () => {
+  const clean = () => {
     if (pollTimer) clearInterval(pollTimer);
     if (convoPollTimer) clearInterval(convoPollTimer);
     if (timeoutTimer) clearTimeout(timeoutTimer);
   };
-
-  timeoutTimer = setTimeout(() => {
-    cleanTimers();
-    requesterWs.send(JSON.stringify({
-      type: 'response',
-      id,
-      text: 'IDE 응답 시간이 초과됐습니다. Antigravity IDE가 다른 작업을 수행 중인지 확인해 주세요.',
-    }));
-  }, 45000); // 45 seconds overall timeout to allow full generation
+  timeoutTimer = setTimeout(() => { clean(); requesterWs.send(JSON.stringify({ type: 'response', id, text: 'IDE 응답 시간 초과' })); }, 60000);
 
   pollTimer = setInterval(async () => {
     try {
       const job = await getJSON(`/conversations/jobs/${jobId}`);
-      console.log(`[Bridge] Polling job ${jobId} status: ${job?.status}`);
-      
       if (!job) return;
-      
       if (job.status === 'completed') {
-        clearInterval(pollTimer);
-        pollTimer = null;
-        
+        clearInterval(pollTimer); pollTimer = null;
         const convoId = job.conversation_id;
-        console.log(`[Bridge] Job completed! Conversation ID: ${convoId}. Opening in IDE panel...`);
-
-        // ✅ Focus the conversation in the IDE panel immediately
-        // This switches the IDE chat panel to show this conversation in real-time
-        postJSON(`/conversations/${convoId}/focus`, {})
-          .then(r => console.log(`[Bridge] ✅ Conversation focused in IDE panel: ${convoId}`, r?.data))
-          .catch(e => console.warn(`[Bridge] Could not focus conversation in IDE panel: ${e.message}`));
-
-
+        console.log(`[Bridge] New convo ready: ${convoId}`);
+        // Focus it in the IDE
+        postJSON(`/conversations/${convoId}/focus`, {}).catch(() => {});
         let attempts = 0;
-        const maxAttempts = 40;
-
-        
         convoPollTimer = setInterval(async () => {
           attempts++;
           try {
@@ -528,68 +613,33 @@ async function forwardToIDE(id, prompt, modelId, requesterWs) {
               getJSON(`/conversations/${convoId}`),
               listConversations().catch(() => null),
             ]);
-
             const finished = isConversationFinished(convo);
-            const idle = convoList ? isCascadeIdle(convoList, convoId) : true; // if list fails, assume idle
-
-            console.log(`[Bridge] Poll attempt ${attempts}/${maxAttempts}: finished=${finished}, idle=${idle}`);
-
+            const idle = convoList ? isCascadeIdle(convoList, convoId) : true;
             if (finished && idle) {
               const result = extractConversationText(convo);
-              cleanTimers();
+              clean();
               if (result) {
-                console.log(`[Bridge] ✅ AI Response retrieved. Sending to client.`);
                 requesterWs.send(JSON.stringify({ type: 'response', id, text: result }));
-                // Report this model as working
                 requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: 'ok' }));
               } else {
                 const errStep = (convo?.trajectory?.steps ?? []).findLast(s => s.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE');
-                const userErrMsg = errStep?.errorMessage?.error?.userErrorMessage;
-                const errorCode = errStep?.errorMessage?.error?.errorCode;
-                // Determine error type for UI
-                let modelStatus = 'unavailable';
-                let fallbackText = 'IDE에서 대화를 열었으나, AI가 답변을 작성하지 못했습니다.';
-                if (userErrMsg) {
-                  if (errorCode === 429 || userErrMsg.includes('quota') || userErrMsg.includes('Individual quota')) {
-                    modelStatus = 'quota_exceeded';
-                    fallbackText = `⚠️ 한도 초과: ${userErrMsg}`;
-                  } else if (userErrMsg.includes('unknown model') || userErrMsg.includes('not found') || userErrMsg.includes('terminated')) {
-                    modelStatus = 'unavailable';
-                    fallbackText = `⚠️ 모델 사용 불가: ${userErrMsg}`;
-                  } else {
-                    fallbackText = `⚠️ IDE AI 오류: ${userErrMsg}`;
-                  }
-                }
-                console.warn(`[Bridge] Conversation finished but no text. Status: ${modelStatus}`, errStep);
-                requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: modelStatus }));
-                requesterWs.send(JSON.stringify({ type: 'response', id, text: fallbackText }));
+                const msg = errStep?.errorMessage?.error?.userErrorMessage;
+                requesterWs.send(JSON.stringify({ type: 'response', id, text: msg ? `⚠️ ${msg}` : 'IDE 응답 없음' }));
               }
-            } else if (attempts >= maxAttempts) {
-              cleanTimers();
-              requesterWs.send(JSON.stringify({
-                type: 'response',
-                id,
-                text: 'IDE 응답 대기 시간이 초과됐습니다. AI가 여전히 처리 중이거나 오류가 발생했을 수 있습니다.',
-              }));
+            } else if (attempts >= 50) {
+              clean();
+              requesterWs.send(JSON.stringify({ type: 'response', id, text: '대기 시간 초과' }));
             }
-          } catch (convoErr) {
-            console.error(`[Bridge] Conversation polling error:`, convoErr.message);
-          }
+          } catch (e) { console.error('[Bridge] convoPoll error:', e.message); }
         }, 1000);
       } else if (job.status === 'failed') {
-        cleanTimers();
-        console.error(`[Bridge] Job failed:`, job.error);
-        requesterWs.send(JSON.stringify({
-          type: 'response',
-          id,
-          text: `IDE 처리 오류: ${job.error || '알 수 없음'}`,
-        }));
+        clean();
+        requesterWs.send(JSON.stringify({ type: 'response', id, text: `IDE 처리 오류: ${job.error || '알 수 없음'}` }));
       }
-    } catch (err) {
-      console.error(`[Bridge] Polling error:`, err.message);
-    }
+    } catch (err) { console.error('[Bridge] job poll error:', err.message); }
   }, 1000);
 }
+
 
 function extractConversationText(convo) {
   const steps = convo?.trajectory?.steps ?? [];
