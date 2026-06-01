@@ -789,7 +789,9 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   overflow: hidden;
-  min-width: 190px;
+  min-width: 230px;
+  max-height: 400px;
+  overflow-y: auto;
   box-shadow: 0 12px 40px rgba(0,0,0,0.4);
   z-index: 200;
   animation: dropIn 0.15s ease;
@@ -799,18 +801,63 @@ a:hover { text-decoration: underline; }
   to   { opacity: 1; transform: translateY(0); }
 }
 
+.model-dropdown-section-label {
+  padding: 6px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  background: rgba(255,255,255,0.02);
+}
+
 .model-option {
-  padding: 9px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
   font-size: 12.5px;
   color: var(--text-2);
   cursor: pointer;
   transition: all 0.1s;
 }
 .model-option:hover { background: rgba(255,255,255,0.04); color: var(--text-1); }
-.model-option.active { color: var(--accent); }
+.model-option.active { color: var(--accent); background: rgba(59,130,246,0.08); }
 .model-option.dimmed { color: var(--text-3); }
 
+.model-opt-icon { font-size: 13px; flex-shrink: 0; width: 18px; text-align: center; }
+.model-opt-name { flex: 1; }
+.model-opt-name small { font-size: 10px; opacity: 0.6; margin-left: 3px; }
+
+/* Quota status badges */
+.model-quota-badge {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.model-quota-badge.quota-exceeded {
+  background: rgba(239,68,68,0.15);
+  color: #f87171;
+  border: 1px solid rgba(239,68,68,0.3);
+}
+.model-quota-badge.quota-unavailable {
+  background: rgba(107,114,128,0.15);
+  color: var(--text-3);
+  border: 1px solid rgba(107,114,128,0.2);
+}
+
+/* Model row states */
+.model-option.model-quota-exceeded { opacity: 0.65; }
+.model-option.model-quota-exceeded:hover { opacity: 1; background: rgba(239,68,68,0.05); }
+.model-option.model-unavailable { opacity: 0.5; }
+.model-option.model-unavailable:hover { opacity: 0.75; }
+
 .model-separator { height: 1px; background: var(--border); margin: 4px 0; }
+
+
 
 /* API Key Notice */
 .api-key-notice {

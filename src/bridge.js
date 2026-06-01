@@ -1,13 +1,13 @@
 /**
  * bridge.js — Local Antigravity IDE bridge connector
  * Connects to the ag-bridge.mjs script running on the user's machine
- * via WebSocket (ws://127.0.0.1:5821)
+ * via WebSocket (ws://127.0.0.1:5822)
  */
 
 import { showToast } from './utils.js';
 import { onBridgeMessage } from './chat.js';
 
-const BRIDGE_PORTS = [5822, 5820, 5821, 3000];
+const BRIDGE_PORTS = [5822, 3000];
 let _bridgeState = 'disconnected'; // 'connecting', 'connected', 'disconnected'
 let _ideConnected = false;
 let _ws = null;
@@ -20,6 +20,8 @@ window.__bridge = {
   connected: false,
   ws: null,
   connect,
+  selectedIdeModel: 342, // GPT_OSS default
+  modelQuotaStatus: {}, // modelId -> 'ok' | 'quota_exceeded' | 'unavailable'
 };
 
 /**
@@ -137,12 +139,22 @@ function handleBridgeMessage(msg) {
       break;
 
     case 'response':
-      // AI response from Antigravity IDE
-      onBridgeMessage(msg.text);
+      // NOTE: In shared-ide mode, responses are handled directly by sendViaBridge() Promise.
+      // onBridgeMessage is NOT called here to prevent duplicate responses.
+      // (The Promise resolver in chat.js already handles the response.)
+      // Only call onBridgeMessage in local-ide mode (handled by chat.js directly).
+      break;
+
+    case 'modelStatus':
+      // Bridge reports quota/availability of a model
+      if (msg.modelId !== undefined) {
+        window.__bridge.modelQuotaStatus[msg.modelId] = msg.status; // 'ok' | 'quota_exceeded' | 'unavailable'
+        // Dispatch event so chat.js can update the UI
+        window.dispatchEvent(new CustomEvent('modelStatusUpdate', { detail: msg }));
+      }
       break;
 
     case 'fileChange':
-      // IDE changed a file — could sync to editor
       console.log('[Bridge] File changed:', msg.path);
       break;
 

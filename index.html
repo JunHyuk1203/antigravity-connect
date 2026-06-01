@@ -247,18 +247,64 @@
             <div class="model-selector" id="model-selector">
               <button class="model-btn" id="model-btn">
                 <div class="model-indicator"></div>
-                <span id="model-name-display">Antigravity IDE (공유 호스트)</span>
+                <span id="model-name-display">GPT-OSS 120B</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
-               <div class="model-dropdown" id="model-dropdown" style="display:none">
-                <div class="model-option active" data-model="shared-ide">🌐 Antigravity IDE (공유 호스트)</div>
-                <div class="model-option dimmed" data-model="local-ide">🔌 Antigravity IDE (개인 로컬)</div>
+              <div class="model-dropdown" id="model-dropdown" style="display:none">
+                <div class="model-dropdown-section-label">Antigravity IDE 모델</div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="342" id="mopt-342">
+                  <span class="model-opt-icon">⚡</span>
+                  <span class="model-opt-name">GPT-OSS 120B <small>(Medium)</small></span>
+                  <span class="model-quota-badge" id="quota-342"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1018" id="mopt-1018">
+                  <span class="model-opt-icon">✦</span>
+                  <span class="model-opt-name">Gemini 3.5 Flash <small>(Medium)</small></span>
+                  <span class="model-quota-badge" id="quota-1018"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1019" id="mopt-1019">
+                  <span class="model-opt-icon">✦</span>
+                  <span class="model-opt-name">Gemini 3.5 Flash <small>(High)</small></span>
+                  <span class="model-quota-badge" id="quota-1019"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1017" id="mopt-1017">
+                  <span class="model-opt-icon">✦</span>
+                  <span class="model-opt-name">Gemini 3.5 Flash <small>(Low)</small></span>
+                  <span class="model-quota-badge" id="quota-1017"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1164" id="mopt-1164">
+                  <span class="model-opt-icon">◆</span>
+                  <span class="model-opt-name">Gemini 3.1 Pro <small>(Low)</small></span>
+                  <span class="model-quota-badge" id="quota-1164"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1165" id="mopt-1165">
+                  <span class="model-opt-icon">◆</span>
+                  <span class="model-opt-name">Gemini 3.1 Pro <small>(High)</small></span>
+                  <span class="model-quota-badge" id="quota-1165"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1163" id="mopt-1163">
+                  <span class="model-opt-icon">🔮</span>
+                  <span class="model-opt-name">Claude Sonnet 4.6 <small>(Thinking)</small></span>
+                  <span class="model-quota-badge" id="quota-1163"></span>
+                </div>
+                <div class="model-option" data-model="shared-ide" data-ide-model="1154" id="mopt-1154">
+                  <span class="model-opt-icon">🔮</span>
+                  <span class="model-opt-name">Claude Opus 4.6 <small>(Thinking)</small></span>
+                  <span class="model-quota-badge" id="quota-1154"></span>
+                </div>
                 <div class="model-separator"></div>
-                <div class="model-option" data-model="gemini-3.5-flash">Gemini 3.5 Flash (개인 API 키)</div>
-                <div class="model-option" data-model="gemini-3.1-pro">Gemini 3.1 Pro (개인 API 키)</div>
-                <div class="model-option" data-model="gemini-3.1-flash">Gemini 3.1 Flash (개인 API 키)</div>
+                <div class="model-dropdown-section-label">개인 Gemini API 키</div>
+                <div class="model-option" data-model="gemini-3.5-flash" data-ide-model="">
+                  <span class="model-opt-icon">🔑</span>
+                  <span class="model-opt-name">Gemini 3.5 Flash <small>(내 키)</small></span>
+                </div>
+                <div class="model-option" data-model="gemini-3.1-pro" data-ide-model="">
+                  <span class="model-opt-icon">🔑</span>
+                  <span class="model-opt-name">Gemini 3.1 Pro <small>(내 키)</small></span>
+                </div>
               </div>
             </div>
+
           </div>
         </div>
 

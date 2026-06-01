@@ -263,8 +263,8 @@ server.on('upgrade', (req, socket) => {
         break;
 
       case 'ask':
-        console.log(`[Bridge] Ask from web: "${msg.prompt?.slice(0, 60)}..."`);
-        await forwardToIDE(msg.id, msg.prompt, ws);
+        console.log(`[Bridge] Ask from web: "${msg.prompt?.slice(0, 60)}..." model=${msg.model || DEFAULT_MODEL}`);
+        await forwardToIDE(msg.id, msg.prompt, msg.model || DEFAULT_MODEL, ws);
         break;
 
       default:
@@ -444,7 +444,7 @@ function isCascadeIdle(listData, conversationId) {
   return entry.status === 'CASCADE_RUN_STATUS_IDLE';
 }
 
-async function forwardToIDE(id, prompt, requesterWs) {
+async function forwardToIDE(id, prompt, modelId, requesterWs) {
   if (!ideSocket || ideSocket.readyState !== 1) {
     requesterWs.send(JSON.stringify({
       type: 'response',
@@ -454,11 +454,12 @@ async function forwardToIDE(id, prompt, requesterWs) {
     return;
   }
 
-  console.log(`[Bridge] Queueing job in IDE with model=${DEFAULT_MODEL} (Claude Sonnet)...`);
+  const resolvedModel = (typeof modelId === 'number' && modelId > 0) ? modelId : DEFAULT_MODEL;
+  console.log(`[Bridge] Queueing job in IDE with model=${resolvedModel}...`);
   
   let jobId = null;
   try {
-    const result = await postJSON('/conversations', { text: prompt, model: DEFAULT_MODEL });
+    const result = await postJSON('/conversations', { text: prompt, model: resolvedModel });
     const res = result.data;
     if (res && res.success && res.job_id) {
       jobId = res.job_id;
@@ -507,10 +508,18 @@ async function forwardToIDE(id, prompt, requesterWs) {
         pollTimer = null;
         
         const convoId = job.conversation_id;
-        console.log(`[Bridge] Job completed! Conversation ID: ${convoId}. Waiting for cascade idle + response...`);
-        
+        console.log(`[Bridge] Job completed! Conversation ID: ${convoId}. Opening in IDE panel...`);
+
+        // ✅ Focus the conversation in the IDE panel immediately
+        // This switches the IDE chat panel to show this conversation in real-time
+        postJSON(`/conversations/${convoId}/focus`, {})
+          .then(r => console.log(`[Bridge] ✅ Conversation focused in IDE panel: ${convoId}`, r?.data))
+          .catch(e => console.warn(`[Bridge] Could not focus conversation in IDE panel: ${e.message}`));
+
+
         let attempts = 0;
         const maxAttempts = 40;
+
         
         convoPollTimer = setInterval(async () => {
           attempts++;
@@ -531,15 +540,29 @@ async function forwardToIDE(id, prompt, requesterWs) {
               if (result) {
                 console.log(`[Bridge] ✅ AI Response retrieved. Sending to client.`);
                 requesterWs.send(JSON.stringify({ type: 'response', id, text: result }));
+                // Report this model as working
+                requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: 'ok' }));
               } else {
-                // finished but no text — report error step if present
                 const errStep = (convo?.trajectory?.steps ?? []).findLast(s => s.type === 'CORTEX_STEP_TYPE_ERROR_MESSAGE');
                 const userErrMsg = errStep?.errorMessage?.error?.userErrorMessage;
-                const fallback = userErrMsg
-                  ? `⚠️ IDE AI 오류: ${userErrMsg}`
-                  : 'IDE에서 대화를 열었으나, AI가 답변을 작성하지 못했습니다.';
-                console.warn(`[Bridge] Conversation finished but no text. Error step:`, errStep);
-                requesterWs.send(JSON.stringify({ type: 'response', id, text: fallback }));
+                const errorCode = errStep?.errorMessage?.error?.errorCode;
+                // Determine error type for UI
+                let modelStatus = 'unavailable';
+                let fallbackText = 'IDE에서 대화를 열었으나, AI가 답변을 작성하지 못했습니다.';
+                if (userErrMsg) {
+                  if (errorCode === 429 || userErrMsg.includes('quota') || userErrMsg.includes('Individual quota')) {
+                    modelStatus = 'quota_exceeded';
+                    fallbackText = `⚠️ 한도 초과: ${userErrMsg}`;
+                  } else if (userErrMsg.includes('unknown model') || userErrMsg.includes('not found') || userErrMsg.includes('terminated')) {
+                    modelStatus = 'unavailable';
+                    fallbackText = `⚠️ 모델 사용 불가: ${userErrMsg}`;
+                  } else {
+                    fallbackText = `⚠️ IDE AI 오류: ${userErrMsg}`;
+                  }
+                }
+                console.warn(`[Bridge] Conversation finished but no text. Status: ${modelStatus}`, errStep);
+                requesterWs.send(JSON.stringify({ type: 'modelStatus', modelId: resolvedModel, status: modelStatus }));
+                requesterWs.send(JSON.stringify({ type: 'response', id, text: fallbackText }));
               }
             } else if (attempts >= maxAttempts) {
               cleanTimers();

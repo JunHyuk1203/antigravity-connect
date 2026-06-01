@@ -12,10 +12,21 @@ let _ydoc    = null;
 let _ymsg    = null; // Y.Array of message objects
 let _APP     = null;
 let _apiKey  = null;
-let _model   = 'shared-ide'; // Default to Shared IDE!
+let _model   = 'gemini-3.5-flash'; // Default to Gemini API
 let _useLocalBridge = false;
-let _useSharedBridge = true; // Default to true!
-let _processingRequests = new Set(); // Host-only to avoid duplicate bridge requests
+let _useSharedBridge = false;
+let _processingRequests = new Set();
+let _selectedIdeModelId = 342; // GPT_OSS - default IDE model
+const IDE_MODEL_NAMES = {
+  342:  'GPT-OSS 120B',
+  1018: 'Gemini 3.5 Flash (M)',
+  1019: 'Gemini 3.5 Flash (H)',
+  1017: 'Gemini 3.5 Flash (L)',
+  1164: 'Gemini 3.1 Pro (L)',
+  1165: 'Gemini 3.1 Pro (H)',
+  1163: 'Claude Sonnet 4.6',
+  1154: 'Claude Opus 4.6',
+};
 
 // ─── Init ────────────────────────────────────────
 export function initChat(ydoc, APP) {
@@ -92,6 +103,15 @@ export function initChat(ydoc, APP) {
   // Bridge room display
   const roomDisplay = document.getElementById('bridge-room-display');
   if (roomDisplay) roomDisplay.textContent = APP.roomId;
+
+  // Model status update from bridge
+  window.addEventListener('modelStatusUpdate', (e) => {
+    const { modelId, status } = e.detail;
+    updateModelQuotaBadge(modelId, status);
+  });
+
+  // Auto-select first IDE model if bridge is connected
+  selectIdeModelById(342);
 }
 
 // ─── Message Rendering ────────────────────────────
@@ -170,8 +190,8 @@ async function sendMessage() {
   document.getElementById('chat-send-btn').disabled = true;
 
   if (_model === 'shared-ide') {
-    if (!window.__hostIdeConnected?.connected) {
-      showToast('⚠️ 현재 룸에 연결된 호스트 IDE가 없습니다. 개인 API 키를 등록하거나 호스트 IDE 연결을 기다려 주세요.', 'error');
+    if (!window.__bridge?.connected) {
+      showToast('⚠️ 브릿지에 연결된 IDE가 없습니다. 런청에서 브릿지를 실행하세요.', 'error');
       input.value = text;
       input.style.height = Math.min(input.scrollHeight, 130) + 'px';
       document.getElementById('chat-send-btn').disabled = false;
@@ -198,10 +218,11 @@ async function sendMessage() {
       id:           pendingId,
       role:         'ai',
       type:         'message',
-      name:         'Antigravity AI (공유 호스트)',
-      text:         '⏳ 호스트 IDE의 응답을 대기 중...',
+      name:         'Antigravity AI (연결된 IDE)',
+      text:         '⏳ IDE 응답을 대기 중...',
       status:       'pending',
       prompt:       ctx,
+      ideModelId:   _selectedIdeModelId,
       ts:           Date.now(),
     };
     _ymsg.push([pendingMsg]);
@@ -318,15 +339,15 @@ ${prompt}`,
 }
 
 // ─── Bridge ───────────────────────────────────────
-async function sendViaBridge(prompt) {
+async function sendViaBridge(prompt, ideModelId) {
   return new Promise((resolve, reject) => {
     const bridge = window.__bridge;
     if (!bridge?.ws) { reject(new Error('브릿지 미연결')); return; }
 
     const reqId = Date.now().toString();
-    bridge.ws.send(JSON.stringify({ type: 'ask', id: reqId, prompt }));
+    bridge.ws.send(JSON.stringify({ type: 'ask', id: reqId, prompt, model: ideModelId || _selectedIdeModelId }));
 
-    const timeout = setTimeout(() => reject(new Error('브릿지 응답 시간 초과')), 30000);
+    const timeout = setTimeout(() => reject(new Error('브릿지 응답 시간 초과')), 60000);
 
     const handler = (evt) => {
       try {
@@ -421,22 +442,69 @@ function selectModel(opt) {
   document.querySelectorAll('.model-option').forEach(o => o.classList.remove('active'));
   opt.classList.add('active');
   _model = opt.dataset.model;
-  document.getElementById('model-name-display').textContent = opt.textContent;
-  document.getElementById('model-dropdown').style.display = 'none';
 
-  if (_model === 'local-ide') {
-    _useLocalBridge = true;
-    _useSharedBridge = false;
-    openBridgeModal();
-  } else if (_model === 'shared-ide') {
-    _useLocalBridge = false;
-    _useSharedBridge = true;
+  // Check if this is an IDE model
+  const ideModelIdStr = opt.dataset.ideModel;
+  if (ideModelIdStr && ideModelIdStr !== '') {
+    const ideModelId = parseInt(ideModelIdStr, 10);
+    selectIdeModelById(ideModelId);
   } else {
+    // Gemini API model
     _useLocalBridge = false;
     _useSharedBridge = false;
+    _model = opt.dataset.model;
+    const nameEl = opt.querySelector('.model-opt-name');
+    document.getElementById('model-name-display').textContent = nameEl ? nameEl.textContent : opt.textContent.trim();
+  }
+
+  document.getElementById('model-dropdown').style.display = 'none';
+  updateAPIKeyUI();
+}
+
+function selectIdeModelById(ideModelId) {
+  _selectedIdeModelId = ideModelId;
+  _model = 'shared-ide';
+  _useLocalBridge = false;
+  _useSharedBridge = true;
+
+  // Update bridge state
+  if (window.__bridge) window.__bridge.selectedIdeModel = ideModelId;
+
+  // Update display name
+  const name = IDE_MODEL_NAMES[ideModelId] || `Model ${ideModelId}`;
+  document.getElementById('model-name-display').textContent = name;
+
+  // Check quota status
+  const status = window.__bridge?.modelQuotaStatus?.[ideModelId];
+  if (status === 'quota_exceeded') {
+    showToast(`⚠️ ${name}: 한도 초과 상태입니다. 다른 모델을 선택하세요.`, 'error');
+  } else if (status === 'unavailable') {
+    showToast(`⚠️ ${name}: 현재 계정에서 사용 불가능한 모델입니다.`, 'error');
   }
 
   updateAPIKeyUI();
+}
+
+function updateModelQuotaBadge(modelId, status) {
+  const badge = document.getElementById(`quota-${modelId}`);
+  if (!badge) return;
+  if (status === 'quota_exceeded') {
+    badge.textContent = '한도 초과';
+    badge.className = 'model-quota-badge quota-exceeded';
+  } else if (status === 'unavailable') {
+    badge.textContent = '미지원';
+    badge.className = 'model-quota-badge quota-unavailable';
+  } else if (status === 'ok') {
+    badge.textContent = '';
+    badge.className = 'model-quota-badge';
+  }
+
+  // Also mark the option row visually
+  const optEl = document.getElementById(`mopt-${modelId}`);
+  if (optEl) {
+    optEl.classList.toggle('model-quota-exceeded', status === 'quota_exceeded');
+    optEl.classList.toggle('model-unavailable', status === 'unavailable');
+  }
 }
 
 // ─── Bridge Modal ─────────────────────────────────
@@ -477,13 +545,15 @@ async function checkForPendingRequests() {
 
   console.log(`[Host] Processing pending request: ${msg.id}`);
 
+  const ideModelId = msg.ideModelId || _selectedIdeModelId;
+
   // Claim the task
   const claimedMsg = {
     ...msg,
     status: 'processing',
     hostClientId: _ydoc.clientID.toString(),
     hostName: _APP.myName,
-    text: `⏳ Antigravity IDE에서 답변을 생성하는 중... (호스트: ${escHtml(_APP.myName)})`,
+    text: `⏳ Antigravity IDE에서 답변을 생성하는 중... (호스트: ${escHtml(_APP.myName)}, 모델: ${IDE_MODEL_NAMES[ideModelId] || ideModelId})`,
   };
 
   try {
@@ -496,7 +566,7 @@ async function checkForPendingRequests() {
       }
     });
 
-    const response = await sendViaBridge(msg.prompt);
+    const response = await sendViaBridge(msg.prompt, ideModelId);
 
     const finalMsg = {
       id:   msg.id,
