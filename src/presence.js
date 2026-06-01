@@ -37,6 +37,18 @@ export function initPresence(provider, myName, myColor) {
     renderAvatars(states);
     updateHostIdeStatus(states);
   });
+
+  // Track cursor position in editor
+  const editor = document.getElementById('code-editor');
+  if (editor) {
+    editor.addEventListener('keyup',  () => updateCursorAwareness(provider));
+    editor.addEventListener('click',  () => updateCursorAwareness(provider));
+    editor.addEventListener('select', () => updateCursorAwareness(provider));
+  }
+
+  // Initial render
+  renderAvatars(provider.awareness.getStates());
+  updateHostIdeStatus(provider.awareness.getStates());
 }
 
 function updateHostIdeStatus(states) {
@@ -60,19 +72,6 @@ function updateHostIdeStatus(states) {
     }
   }
   window.__hostIdeConnected = { connected: hostConnected, name: hostName };
-}
-
-  // Track cursor position in editor
-  const editor = document.getElementById('code-editor');
-  if (editor) {
-    editor.addEventListener('keyup',  () => updateCursorAwareness(provider));
-    editor.addEventListener('click',  () => updateCursorAwareness(provider));
-    editor.addEventListener('select', () => updateCursorAwareness(provider));
-  }
-
-  // Initial render
-  renderAvatars(provider.awareness.getStates());
-  updateHostIdeStatus(provider.awareness.getStates());
 }
 
 function initials(name) {
