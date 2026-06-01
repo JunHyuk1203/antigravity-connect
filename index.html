@@ -10,6 +10,16 @@
     window.addEventListener('unhandledrejection', function(e) {
       alert('⚠️ 비동기 프로미스 예외 발생:\n\n' + e.reason);
     });
+    window.debugLog = function(msg) {
+      const el = document.getElementById('debug-log');
+      if (el) {
+        const row = document.createElement('div');
+        row.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        el.appendChild(row);
+        el.scrollTop = el.scrollHeight;
+      }
+      console.log('[Debug] ' + msg);
+    };
   </script>
   <title>Antigravity Connect — 실시간 협업 코딩</title>
   <meta name="description" content="Antigravity IDE와 연동된 실시간 협업 코딩 환경. 팀과 함께 코드를 편집하고 AI에게 질문하세요." />
@@ -345,6 +355,11 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Floating Live Debug Terminal -->
+  <div id="debug-log" style="position:fixed; bottom:12px; left:12px; background:rgba(10,14,20,0.92); color:#4AF626; font-family:'Consolas','Courier New',monospace; font-size:10.5px; padding:10px 14px; border-radius:8px; max-height:120px; width:340px; overflow-y:auto; z-index:10000; pointer-events:none; border:1px solid rgba(74,246,38,0.25); box-shadow:0 8px 32px rgba(0,0,0,0.5); backdrop-filter:blur(8px);">
+    <div style="font-weight:bold; border-bottom:1px solid rgba(74,246,38,0.15); padding-bottom:4px; margin-bottom:6px; color:#ffffff;">▲ ANTIGRAVITY LIVE DEBUG</div>
   </div>
 
   <script type="module" src="src/main.js"></script>
