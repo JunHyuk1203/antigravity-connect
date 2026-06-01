@@ -396,10 +396,10 @@ function updateAPIKeyUI() {
   const notice = document.getElementById('api-key-notice');
   if (!notice) return;
 
-  if (_apiKey) {
-    notice.style.display = 'none';
-  } else {
+  if (_model.startsWith('gemini') && !_apiKey) {
     notice.style.display = '';
+  } else {
+    notice.style.display = 'none';
   }
 }
 
@@ -427,6 +427,8 @@ function selectModel(opt) {
     _useLocalBridge = false;
     _useSharedBridge = false;
   }
+
+  updateAPIKeyUI();
 }
 
 // ─── Bridge Modal ─────────────────────────────────
