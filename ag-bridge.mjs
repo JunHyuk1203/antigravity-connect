@@ -426,7 +426,7 @@ async function forwardToIDE(id, prompt, requesterWs) {
   
   let jobId = null;
   try {
-    const res = await postJSON('/conversations', { text: prompt, model: 'auto' });
+    const res = await postJSON('/conversations', { text: prompt });
     if (res && res.success && res.job_id) {
       jobId = res.job_id;
       console.log(`[Bridge] Job queued successfully, Job ID: ${jobId}`);
